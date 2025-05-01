@@ -1,0 +1,206 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgres"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  STUDENT
+  STAFF
+  ADMIN
+}
+
+model Course {
+  id                 String @id // User-provided id
+  githubOrg          String
+  githubRepoPrefix   String
+  githubToken        String
+  name               String
+  token              String
+  queryToken         String
+  feedbackBranchName String
+  courseCutoff       BigInt
+  jenkinsBaseUrl     String
+
+  // Extensions config
+  numExtensions     Int
+  numExtensionHours Int
+
+  // Relations
+  users                 Users[]
+  Job                   Job[]
+  Assignment            Assignment[]
+  StagingGrades         StagingGrades[]
+  PublishedGrades       PublishedGrades[]
+  RegisteredGradingJobs RegisteredGradingJobs[]
+}
+
+model Users {
+  netId                 String
+  role                  Role
+  courseId              String
+  course                Course                  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  JobUser               JobUser[]
+  Grades                PublishedGrades[]
+  StagingGrades         StagingGrades[]
+  RegisteredGradingJobs RegisteredGradingJobs[]
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+
+  @@id([netId, courseId]) // Composite primary key
+  @@index([netId])
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+  RECOVERY
+}
+
+enum JobType {
+  STUDENT_INITIATED
+  FINAL_GRADING
+  REGRADE
+}
+
+enum AssignmentVisibility {
+  DEFAULT
+  FORCE_OPEN
+  FORCE_CLOSE
+  INVISIBLE_FORCE_CLOSE
+}
+
+enum AssignmentQuota {
+  DAILY
+  TOTAL
+}
+
+enum Category {
+  LAB
+  MP
+  ATTENDANCE
+  OTHER
+}
+
+model Assignment {
+  id          String
+  name        String
+  courseId    String
+  visibility  AssignmentVisibility
+  quotaPeriod AssignmentQuota
+  category    Category
+
+  quotaAmount           Int
+  finalGradingRunId     String?
+  openAt                DateTime
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+  Job                   Job[]
+  Course                Course                  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  RegisteredGradingJobs RegisteredGradingJobs[]
+  PublishedGrades       PublishedGrades[]
+
+  @@id([courseId, id]) // Composite primary key
+  @@index([courseId, visibility])
+}
+
+model Job {
+  id           String     @id @default(cuid())
+  name         String
+  courseId     String
+  course       Course     @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  assignmentId String
+  assignment   Assignment @relation(fields: [courseId, assignmentId], references: [courseId, id], onDelete: Cascade)
+  type         JobType
+
+  dueAt       DateTime
+  scheduledAt DateTime?
+  runAt       DateTime?
+  status      JobStatus @default(PENDING)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  completedAt DateTime?
+  failedAt    DateTime?
+  JobUser     JobUser[]
+
+  @@index([status, scheduledAt])
+  @@index([name, status])
+  @@index([courseId, assignmentId, type])
+}
+
+model JobUser {
+  jobId     String
+  netId     String
+  courseId  String
+  status    JobStatus
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  job  Job   @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  user Users @relation(fields: [netId, courseId], references: [netId, courseId], onDelete: Cascade)
+
+  @@id([jobId, netId, courseId]) // Composite PK
+  @@index([jobId])
+}
+
+enum RegisteredGradingJobsStatus {
+  STARTED
+  FINISHED
+}
+
+model RegisteredGradingJobs {
+  id           String   @id
+  courseId     String
+  assignmentId String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  course        Course          @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  assignment    Assignment      @relation(fields: [courseId, assignmentId], references: [courseId, id], onDelete: NoAction)
+  usersNetId    String?
+  usersCourseId String?
+  Users         Users?          @relation(fields: [usersNetId, usersCourseId], references: [netId, courseId], onDelete: NoAction)
+  StagingGrades StagingGrades[]
+}
+
+model PublishedGrades {
+  courseId           String
+  assignmentId       String
+  netId              String
+  course             Course     @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  user               Users      @relation(fields: [netId, courseId], references: [netId, courseId], onDelete: NoAction)
+  assignment         Assignment @relation(fields: [courseId, assignmentId], references: [courseId, id], onDelete: NoAction)
+  comments           String?
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+  assignmentCourseId String
+
+  @@id([courseId, assignmentId, netId])
+  @@index([courseId, assignmentId])
+  @@index([netId])
+}
+
+model StagingGrades {
+  jobId String
+  netId String
+  score Float
+
+  gradingJob    RegisteredGradingJobs @relation(fields: [jobId], references: [id], onDelete: NoAction)
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+  Course        Course?               @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  courseId      String?
+  Users         Users?                @relation(fields: [usersNetId, usersCourseId], references: [netId, courseId], onDelete: NoAction)
+  usersNetId    String?
+  usersCourseId String?
+
+  @@id([jobId, netId])
+  @@index([jobId])
+}

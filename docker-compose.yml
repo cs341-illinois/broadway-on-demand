@@ -1,0 +1,15 @@
+version: "3.8"
+services:
+  db:
+    image: postgres:14
+    restart: always
+    environment:
+      POSTGRES_USER: local
+      POSTGRES_PASSWORD: local
+      POSTGRES_DB: broadway_on_demand
+    ports:
+      - "5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+volumes:
+  db_data:
