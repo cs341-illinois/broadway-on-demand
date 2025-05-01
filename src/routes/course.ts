@@ -4,13 +4,14 @@ import { z } from "zod";
 import { createAssignment } from "../functions/assignment.js";
 import { FastifyZodOpenApiTypeProvider } from "fastify-zod-openapi";
 import {
+  AssignmentQuota,
   assignmentResponseBody,
   AssignmentVisibility,
   AutogradableCategory,
   courseResponseBody,
   createAssignmentBodySchema,
 } from "../types/assignment.js";
-import { BaseError, DatabaseInsertError } from "../errors/index.js";
+import { BaseError, DatabaseDeleteError, DatabaseInsertError } from "../errors/index.js";
 import { getCourseRoles } from "../functions/userData.js";
 
 const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
@@ -46,10 +47,10 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
           ...(canSeeInvisible
             ? {}
             : {
-                visibility: {
-                  not: AssignmentVisibility.INVISIBLE_FORCE_CLOSE,
-                },
-              }),
+              visibility: {
+                not: AssignmentVisibility.INVISIBLE_FORCE_CLOSE,
+              },
+            }),
           category: {
             in: [AutogradableCategory.LAB, AutogradableCategory.MP],
           },
@@ -85,6 +86,8 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
           createdAt: undefined,
           updatedAt: undefined,
           courseId: undefined,
+          visibility: assignment.visibility as AssignmentVisibility,
+          quotaPeriod: assignment.quotaPeriod as AssignmentQuota,
           category: assignment.category as AutogradableCategory,
           dueAt: jobsById[assignment.finalGradingRunId!]?.dueAt,
         }));
@@ -197,6 +200,40 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
       });
 
       reply.send({ isStaff, courseName, assignmentName, studentRuns });
+    },
+  );
+  fastify.withTypeProvider<FastifyZodOpenApiTypeProvider>().delete(
+    "/:courseId/assignment/:assignmentId",
+    {
+      onRequest: async (request, reply) => {
+        await fastify.authorize(request, reply, request.params.courseId, [
+          Role.ADMIN,
+        ]);
+      },
+      schema: {
+        params: z.object({
+          courseId: z.string().min(1),
+          assignmentId: z.string().min(1),
+        }),
+        response: {
+          200: z.null(),
+        },
+      },
+    },
+    async (request, reply) => {
+      const { courseId, assignmentId } = request.params;
+      await fastify.prismaClient.assignment.delete({
+        where: {
+          courseId_id: {
+            courseId: courseId,
+            id: assignmentId
+          }
+        }
+      }).catch(e => {
+        request.log.error(e);
+        throw new DatabaseDeleteError({ message: "Could not delete assignment." })
+      })
+      reply.status(204).send();
     },
   );
 };

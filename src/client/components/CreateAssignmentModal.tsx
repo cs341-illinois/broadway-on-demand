@@ -10,6 +10,7 @@ import {
   AssignmentVisibilityLabels,
 } from "../../types/assignment";
 import { useEffect } from "react";
+import { formatDateForInput } from "../utils";
 
 // Use the Zod schema from the import
 type AssignmentFormData = typeof createAssignmentBodySchema._type;
@@ -19,12 +20,14 @@ interface AssignmentModalProps {
   show: boolean;
   handleClose: () => void;
   handleSubmit: (data: AssignmentFormData) => void;
+  initialState?: AssignmentFormData
 }
 
 export default function AssignmentModal({
   show,
   handleClose,
   handleSubmit: onExternalSubmit,
+  initialState
 }: AssignmentModalProps) {
   const {
     register,
@@ -33,9 +36,10 @@ export default function AssignmentModal({
     reset,
     control,
     setValue,
+    getValues
   } = useForm<AssignmentFormData>({
     resolver: zodResolver(createAssignmentBodySchema),
-    defaultValues: {
+    defaultValues: initialState || {
       name: "",
       id: "",
       visibility: AssignmentVisibility.DEFAULT,
@@ -45,6 +49,7 @@ export default function AssignmentModal({
       openAt: new Date(),
       dueAt: new Date(),
     },
+    disabled: Boolean(initialState)
   });
 
   const onSubmit = (data: AssignmentFormData) => {
@@ -72,7 +77,7 @@ export default function AssignmentModal({
     <Modal show={show} onHide={handleClose}>
       <Form onSubmit={handleSubmit(onSubmit)}>
         <Modal.Header closeButton>
-          <Modal.Title>Create Assignment</Modal.Title>
+          <Modal.Title>{initialState ? "Manage" : "Create"} Assignment</Modal.Title>
         </Modal.Header>
         <Modal.Body>
           <Form.Group className="mb-3">
@@ -144,6 +149,7 @@ export default function AssignmentModal({
             <Form.Label>Opens At</Form.Label>
             <Form.Control
               type="datetime-local"
+              value={formatDateForInput(getValues('openAt'))}
               {...register("openAt", { required: "Open date is required" })}
               isInvalid={!!errors.openAt}
             />
@@ -156,6 +162,7 @@ export default function AssignmentModal({
             <Form.Label>Due At</Form.Label>
             <Form.Control
               type="datetime-local"
+              value={formatDateForInput(getValues('dueAt'))}
               {...register("dueAt", { required: "Due date is required" })}
               isInvalid={!!errors.dueAt}
             />
@@ -174,9 +181,9 @@ export default function AssignmentModal({
           >
             Cancel
           </Button>
-          <Button variant="primary" type="submit">
+          {!initialState && <Button variant="primary" type="submit">
             Create
-          </Button>
+          </Button>}
         </Modal.Footer>
       </Form>
     </Modal>

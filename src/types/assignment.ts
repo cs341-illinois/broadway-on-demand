@@ -29,10 +29,10 @@ export enum AssignmentQuota {
 }
 
 export const AssignmentQuotaLabels: HumanReadableEnum<typeof AssignmentQuota> =
-  {
-    DAILY: "per day",
-    TOTAL: "total",
-  };
+{
+  DAILY: "per day",
+  TOTAL: "total",
+};
 
 export enum Category {
   LAB = "LAB",
@@ -81,8 +81,8 @@ export const assignmentsResponseEntry = z.object({
   name: z.string().min(1),
   id: z.string().min(1),
   category: z.nativeEnum(AutogradableCategory),
-  visibility: z.nativeEnum(PrismaAssignmentVisibility),
-  quotaPeriod: z.nativeEnum(PrismaAssignmentQuota),
+  visibility: z.nativeEnum(AssignmentVisibility),
+  quotaPeriod: z.nativeEnum(AssignmentQuota),
   quotaAmount: z.number().min(1),
   openAt: z.date(),
   dueAt: z.date(),

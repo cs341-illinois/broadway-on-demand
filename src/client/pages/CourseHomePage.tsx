@@ -120,7 +120,7 @@ export default function CourseHomePage() {
                           {x.quotaAmount}{" "}
                           {
                             AssignmentQuotaLabels[
-                              x.quotaPeriod as AssignmentQuota
+                            x.quotaPeriod as AssignmentQuota
                             ]
                           }
                         </td>
@@ -176,7 +176,7 @@ export default function CourseHomePage() {
           </Row>
         </Container>
       </div>
-      {}
+      { }
       {courseRoles.includes("ADMIN") && (
         <AssignmentModal
           show={assignmentModal}
