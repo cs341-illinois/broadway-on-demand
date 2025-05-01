@@ -44,7 +44,7 @@ AZURE_TENANT_ID="your-azure-tenant-id"
 
 # Application settings
 BASE_URL="/on-demand"
-HOST="localhost"
+HOST="http://localhost:3000"
 PORT=3000
 
 # Security
@@ -52,7 +52,7 @@ COOKIE_SECRET="a-secure-random-string-at-least-32-characters"
 GRADER_TOKEN="a-secure-random-string-at-least-32-characters"
 
 # Database URL for Prisma
-DATABASE_URL="postgresql://username:password@localhost:5432/broadway"
+DATABASE_URL="postgresql://username:password@localhost:5432/broadway_on_demand"
 ```
 
 All environment variables are validated using Zod schema validation at application startup. The required variables include:
