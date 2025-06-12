@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "allowJs": false,
+    "allowSyntheticDefaultImports": true,
+    "lib": ["es2022"],
+    "module": "Node16",
+    "moduleResolution": "node16",
+    "noEmit": false,
+    "outDir": "dist",
+    "removeComments": true,
+    "rootDir": "src",
+    "skipLibCheck": true,
+    "sourceMap": true,
+    "strict": true,
+    "target": "es2022"
+  },
+  "include": ["src/**/*", "vite.config.js"],
+  "exclude": [
+    "src/client/**/*",
+    "src/client/vite.config.js",
+    "eslint.config.js",
+    "src/generated/**/*"
+  ]
+}

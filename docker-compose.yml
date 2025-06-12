@@ -1,0 +1,27 @@
+services:
+  db:
+    restart: unless-stopped
+    image: postgres:17
+    environment:
+      POSTGRES_USER: local
+      POSTGRES_PASSWORD: local
+      POSTGRES_DB: broadway_on_demand
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/
+  redis:
+    restart: unless-stopped
+    image: redis:8
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
+      interval: 1s
+      timeout: 3s
+      retries: 5
+    command: ["redis-server"]
+
+volumes:
+  db_data:
+  redis_data:

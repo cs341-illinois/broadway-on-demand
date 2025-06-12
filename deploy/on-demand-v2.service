@@ -1,0 +1,13 @@
+[Unit]
+Description=Broadway On-Demand v2
+After=network.target
+
+[Service]
+User=nginx
+Group=nginx
+Restart=on-failure
+WorkingDirectory=/srv/cs341/on-demand
+ExecStart=node dist/server.js
+
+[Install]
+WantedBy=multi-user.target

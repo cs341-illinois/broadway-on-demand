@@ -1,0 +1,30 @@
+@import "styles/illinois.css";
+$white: #ffffff;
+
+$theme-colors: (
+  "light": #d1e9fa,
+  "dark": #121b21,
+  "primary": #13294b,
+  // --il-blue
+  "secondary": #1d58a7,
+  // --il-industrial
+  "info": #5c0e41,
+  // --il-berry
+  "success": #198754,
+  "warning": #e2ca04,
+  "danger": #dc3545,
+);
+
+$font-family-base: var(--il-font-sans);
+$breadcrumb-divider-color: var(--il-altgeld);
+$breadcrumb-divider: quote(">");
+$breadcrumb-divider-flipped: quote("<");
+$breadcrumb-active-color: var(--il-storm-darker-2);
+// Import Bootstrap
+@import "node_modules/bootstrap/scss/bootstrap";
+
+:root {
+  --bs-blue: var(--il-blue);
+  --bs-orange: var(--il-orange);
+  --il-cloud-1: "#e8e9eb";
+}
