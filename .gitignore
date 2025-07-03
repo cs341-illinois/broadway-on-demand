@@ -132,3 +132,4 @@ dist
 src/generated/
 docker-compose.override.yml
 src/client/enums.ts
+.DS_Store
