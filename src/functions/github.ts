@@ -207,7 +207,7 @@ function insertOrUpdateGradeEntries(
   for (const newEntry of newData) {
     const oldEntry = gradesData.find((entry) => entry.netId === newEntry.netId);
     if (oldEntry == null) {
-      gradesData.push({ netId: newEntry.netId, score: newEntry.score });
+      gradesData.push({ netId: newEntry.netId, score: newEntry.score, comments: "" });
     } else {
       oldEntry.score = newEntry.score;
     }
@@ -217,7 +217,7 @@ function insertOrUpdateGradeEntries(
 
 function parseGradesCsvData(csvData: string) {
   const parseResult = parse(csvData, {
-    columns: ["netid", "score", "comments"], // Results look like {netid: ABC, score: 0.0}
+    columns: ["netid", "score", "comments"], // Results look like {netid: ABC, score: 0.0, comments: ""}
     from_line: 2, // Skip headers line
     skip_empty_lines: true,
   }).map((x: any) => ({ netId: x.netid, score: x.score })) as GradeEntry[];
