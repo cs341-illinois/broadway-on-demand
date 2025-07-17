@@ -217,10 +217,10 @@ function insertOrUpdateGradeEntries(
 
 function parseGradesCsvData(csvData: string) {
   const parseResult = parse(csvData, {
-    columns: ["netid", "score", "comments"], // Results look like {netid: ABC, score: 0.0, comments: ""}
+    columns: true,
     from_line: 2, // Skip headers line
     skip_empty_lines: true,
-  }).map((x: any) => ({ netId: x.netid, score: x.score })) as GradeEntry[];
+  }).map((x: any) => ({ netId: x.netid, score: x.score, comments: x.comments })) as GradeEntry[];
   return parseResult;
 }
 
