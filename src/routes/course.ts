@@ -433,7 +433,7 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
         "@illinois.edu",
         "",
       );
-      const body = request.body;
+      let body = request.body;
       const { courseId, assignmentId } = request.params;
       const courseData = await fastify.prismaClient.course.findFirst({
         where: {
@@ -445,6 +445,23 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
           gradesRepo: true,
         },
       });
+      const courseRoster = await fastify.prismaClient.users.findMany({
+        select: {
+          netId: true
+        },
+        where: {
+          courseId,
+          enabled: true
+        }
+      }).catch(e => {
+        request.log.error(e);
+        throw new DatabaseFetchError({
+          message: "Could not get course roster."
+        })
+      })
+      const courseNetIds = new Set(courseRoster.map(x => x.netId));
+      // Only publish records that are in the roster.
+      body = body.filter(x => courseNetIds.has(x.netId));
       if (!courseData) {
         throw new NotFoundError({ endpointName: request.url });
       }
