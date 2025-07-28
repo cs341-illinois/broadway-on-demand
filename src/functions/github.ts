@@ -5,7 +5,7 @@ import { retryAsync } from "./utils.js";
 import { GradeEntry } from "./grades.js";
 import { parse } from "csv-parse/sync";
 import { RequestError } from "@octokit/request-error";
-import { InternalServerError } from "../errors/index.js";
+import { DatabaseFetchError, InternalServerError } from "../errors/index.js";
 
 type UpdateStudentGradesGithubInput = {
   redisClient: RedisClientType;
@@ -48,6 +48,22 @@ export async function updateStudentGradesToGithub({
     const githubClient = new Octokit({
       auth: githubToken,
     });
+    try {
+      githubClient.rest.orgs.get({ org: orgName })
+    } catch (e) {
+      logger.error(e);
+      throw new DatabaseFetchError({
+        message: "Failed to get GitHub organization."
+      })
+    }
+    try {
+      githubClient.rest.repos.get({ owner: orgName, repo: repoName })
+    } catch (e) {
+      logger.error(e);
+      throw new DatabaseFetchError({
+        message: "Failed to get GitHub repository."
+      })
+    }
     try {
       logger.debug(`Acquiring lock ${lockId}`);
       const response = await redisClient.set(lockId, lockTs, {
@@ -309,6 +325,25 @@ export async function overwriteRosterToGithub({
   logger,
 }: OverwriteRosterGithubInput) {
   let error: any;
+  const githubClient = new Octokit({
+    auth: githubToken,
+  });
+  try {
+    githubClient.rest.orgs.get({ org: orgName })
+  } catch (e) {
+    logger.error(e);
+    throw new DatabaseFetchError({
+      message: "Failed to get GitHub organization."
+    })
+  }
+  try {
+    githubClient.rest.repos.get({ owner: orgName, repo: repoName })
+  } catch (e) {
+    logger.error(e);
+    throw new DatabaseFetchError({
+      message: "Failed to get GitHub repository."
+    })
+  }
   await retryAsync(async () => {
     const lockTs = new Date().getTime();
     const lockId = `ghe_lock:roster:${orgName}:${repoName}`;
@@ -323,10 +358,6 @@ export async function overwriteRosterToGithub({
       }
 
       try {
-        const githubClient = new Octokit({
-          auth: githubToken,
-        });
-
         const { sha: previousSha } = await getFileFromGithub({
           githubOrg: orgName,
           githubRepo: repoName,
