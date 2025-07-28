@@ -45,6 +45,9 @@ export async function updateStudentGradesToGithub({
   await retryAsync(async () => {
     const lockTs = new Date().getTime();
     const lockId = `ghe_lock:${assignmentId}`;
+    const githubClient = new Octokit({
+      auth: githubToken,
+    });
     try {
       logger.debug(`Acquiring lock ${lockId}`);
       const response = await redisClient.set(lockId, lockTs, {
@@ -56,38 +59,40 @@ export async function updateStudentGradesToGithub({
           `Someone else already holds the lock for assignment ID ${assignmentId}`,
         );
       }
-      const githubClient = new Octokit({
-        auth: githubToken,
-      });
-      const { content: oldContent, sha: previousSha } =
-        await getGradeFileFromGithub({
+      try {
+        const { content: oldContent, sha: previousSha } =
+          await getGradeFileFromGithub({
+            githubOrg: orgName,
+            githubRepo: repoName,
+            assignmentId,
+            githubClient,
+          });
+
+        let newGradeData = gradeData;
+        if (oldContent) {
+          const oldGradesData = overwrite ? [] : parseGradesCsvData(oldContent);
+          newGradeData = overwrite
+            ? gradeData
+            : insertOrUpdateGradeEntries(oldGradesData, gradeData);
+        }
+
+        await createOrUpdateGradesFileToGhe({
           githubOrg: orgName,
           githubRepo: repoName,
-          assignmentId,
           githubClient,
+          commitMessage,
+          assignmentId,
+          gradesData: newGradeData,
+          previousSha,
         });
-      let newGradeData = gradeData;
-      if (oldContent) {
-        const oldGradesData = overwrite ? [] : parseGradesCsvData(oldContent);
-        newGradeData = overwrite
-          ? gradeData
-          : insertOrUpdateGradeEntries(oldGradesData, gradeData);
-      }
-      await createOrUpdateGradesFileToGhe({
-        githubOrg: orgName,
-        githubRepo: repoName,
-        githubClient,
-        commitMessage,
-        assignmentId,
-        gradesData: newGradeData,
-        previousSha,
-      }).catch((e: any) => {
+      } catch (e: any) {
         if (e instanceof RequestError && e.status === 409) {
-          throw e; // 409 conflict
+          logger.warn(`Conflict (409) detected on ${assignmentId}. Retrying.`);
+          throw e;
         }
         error = e;
         logger.error("Found non-retryable error", e);
-      });
+      }
     } finally {
       logger.debug(`Releasing lock ${lockId}`);
       const lockValue = await redisClient.get(lockId);
@@ -133,7 +138,6 @@ async function getFileFromGithub({
   content: null | string;
   sha: null | string;
 }> {
-  const defaultRetVal = { content: null, sha: null };
   try {
     const res = await githubClient.rest.repos.getContent({
       owner: githubOrg,
@@ -142,17 +146,19 @@ async function getFileFromGithub({
     });
     const data = res.data as OctokitFileData;
     if (data.type !== "file") {
-      return defaultRetVal;
+      return { content: null, sha: null };
     }
     return {
       content: Buffer.from(data.content, "base64").toString(),
       sha: data.sha,
     };
   } catch (error) {
-    if ((error as any).status !== 404) {
-      console.warn(error);
+    // A 404 is not an operational error; it just means the file doesn't exist yet.
+    if (error instanceof RequestError && error.status === 404) {
+      return { content: null, sha: null };
     }
-    return defaultRetVal;
+    // For any other error (e.g., auth, network), throw it to be handled by the caller.
+    throw error;
   }
 }
 
@@ -315,31 +321,37 @@ export async function overwriteRosterToGithub({
       if (!response) {
         throw new Error(`Someone else already holds the lock for ${repoName}`);
       }
-      const githubClient = new Octokit({
-        auth: githubToken,
-      });
-      const { sha: previousSha } = await getFileFromGithub({
-        githubOrg: orgName,
-        githubRepo: repoName,
-        filePath: "roster.csv",
-        githubClient,
-      });
-      let fileContent = generateRosterCsv(netIds);
-      await createOrUpdateFileToGhe({
-        githubOrg: orgName,
-        githubRepo: repoName,
-        githubClient,
-        commitMessage,
-        filePath: "roster.csv",
-        fileContent,
-        previousSha,
-      }).catch((e: any) => {
+
+      try {
+        const githubClient = new Octokit({
+          auth: githubToken,
+        });
+
+        const { sha: previousSha } = await getFileFromGithub({
+          githubOrg: orgName,
+          githubRepo: repoName,
+          filePath: "roster.csv",
+          githubClient,
+        });
+
+        const fileContent = generateRosterCsv(netIds);
+        await createOrUpdateFileToGhe({
+          githubOrg: orgName,
+          githubRepo: repoName,
+          githubClient,
+          commitMessage,
+          filePath: "roster.csv",
+          fileContent,
+          previousSha,
+        });
+      } catch (e: any) {
         if (e instanceof RequestError && e.status === 409) {
-          throw e; // 409 conflict
+          logger.warn(`Conflict (409) detected on roster. Retrying.`);
+          throw e; // Re-throw for retry
         }
         error = e;
         logger.error("Found non-retryable error", e);
-      });
+      }
     } finally {
       logger.debug(`Releasing lock ${lockId}`);
       const lockValue = await redisClient.get(lockId);
