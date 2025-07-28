@@ -49,7 +49,7 @@ export async function updateStudentGradesToGithub({
       auth: githubToken,
     });
     try {
-      githubClient.rest.orgs.get({ org: orgName })
+      await githubClient.rest.orgs.get({ org: orgName })
     } catch (e) {
       logger.error(e);
       throw new DatabaseFetchError({
@@ -57,7 +57,7 @@ export async function updateStudentGradesToGithub({
       })
     }
     try {
-      githubClient.rest.repos.get({ owner: orgName, repo: repoName })
+      await githubClient.rest.repos.get({ owner: orgName, repo: repoName })
     } catch (e) {
       logger.error(e);
       throw new DatabaseFetchError({
@@ -329,7 +329,7 @@ export async function overwriteRosterToGithub({
     auth: githubToken,
   });
   try {
-    githubClient.rest.orgs.get({ org: orgName })
+    await githubClient.rest.orgs.get({ org: orgName })
   } catch (e) {
     logger.error(e);
     throw new DatabaseFetchError({
@@ -337,7 +337,7 @@ export async function overwriteRosterToGithub({
     })
   }
   try {
-    githubClient.rest.repos.get({ owner: orgName, repo: repoName })
+    await githubClient.rest.repos.get({ owner: orgName, repo: repoName })
   } catch (e) {
     logger.error(e);
     throw new DatabaseFetchError({
