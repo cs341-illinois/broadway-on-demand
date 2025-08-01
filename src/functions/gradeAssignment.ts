@@ -35,6 +35,7 @@ export const jenkinsPayloadSchema = z.object({
   GRADING_RUN_ID: z.string().min(1),
   IS_REGRADE: z.boolean(),
   INTEGRITY_ONLY: z.optional(z.boolean()),
+  BUILD_PRIORITY: z.number().min(1).max(5)
 });
 
 export type JenkinsPayload = z.infer<typeof jenkinsPayloadSchema>;
@@ -48,6 +49,20 @@ type GetJenkinsParamsInputs = {
   logger: FastifyBaseLogger;
 };
 
+const getJobPriority = (jobType: JobType) => {
+  switch (jobType) {
+    case "STUDENT_INITIATED":
+      return 1
+    case "FINAL_GRADING":
+      return 3
+    case "REGRADE":
+      return 4
+    case "STAFF_INITIATED":
+      return 1
+    case "STAFF_INITIATED_GRADING":
+      return 2
+  }
+}
 const getJenkinsParams = ({
   courseId,
   netIds,
@@ -69,6 +84,7 @@ const getJenkinsParams = ({
     IS_REGRADE: type === JobType.REGRADE,
     INTEGRITY_ONLY: false,
     GRADING_RUN_ID: gradingRunId,
+    BUILD_PRIORITY: getJobPriority(type)
   };
   const { data, success, error } =
     jenkinsPayloadSchema.safeParse(proposedPayload);
