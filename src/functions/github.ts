@@ -159,7 +159,15 @@ async function getFileFromGithub({
       owner: githubOrg,
       repo: githubRepo,
       path: filePath,
+    }).catch(error => {
+      if (error.status && error.status === 404) {
+        return null;
+      }
+      throw error;
     });
+    if (res === null) {
+      return { content: null, sha: null }
+    }
     const data = res.data as OctokitFileData;
     if (data.type !== "file") {
       return { content: null, sha: null };
@@ -173,7 +181,6 @@ async function getFileFromGithub({
     if (error instanceof RequestError && error.status === 404) {
       return { content: null, sha: null };
     }
-    // For any other error (e.g., auth, network), throw it to be handled by the caller.
     throw error;
   }
 }
