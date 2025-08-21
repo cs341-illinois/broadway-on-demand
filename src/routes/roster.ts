@@ -278,25 +278,21 @@ const rosterRoutes: FastifyPluginAsync = async (fastify, _options) => {
               });
             let enablePromises = [];
             for (const user of users) {
+              const data = {
+                courseId,
+                netId: user.netId,
+                role: Role.STUDENT,
+                uin: user.uin,
+                enabled: true,
+                name: user.name,
+              };
               enablePromises.push(
                 tx.users.upsert({
                   where: {
                     netId_courseId: { courseId, netId: user.netId },
                   },
-                  create: {
-                    courseId,
-                    netId: user.netId,
-                    role: Role.STUDENT,
-                    uin: user.uin,
-                    enabled: true,
-                  },
-                  update: {
-                    courseId,
-                    netId: user.netId,
-                    role: Role.STUDENT,
-                    uin: user.uin,
-                    enabled: true,
-                  },
+                  create: data,
+                  update: data,
                 }),
               );
             }
