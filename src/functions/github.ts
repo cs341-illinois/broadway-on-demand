@@ -5,12 +5,12 @@ import { retryAsync } from "./utils.js";
 import { GradeEntry } from "./grades.js";
 import { parse } from "csv-parse/sync";
 import { RequestError } from "@octokit/request-error";
-import { DatabaseFetchError, InternalServerError } from "../errors/index.js";
+import { DatabaseFetchError } from "../errors/index.js";
 
 type UpdateStudentGradesGithubInput = {
   redisClient: RedisClientType;
   assignmentId: string;
-  gradeData: { netId: string; score: number }[];
+  gradeData: { netId: string; score: number, comments?: string }[];
   githubToken: string;
   commitMessage: string;
   overwrite?: boolean;
@@ -211,7 +211,7 @@ async function getGradeFileFromGithub({
 function generateGradesCsv(gradesData: GradeEntry[]) {
   const header = `"netid","score","comments"\n`;
   const values = gradesData
-    .map((entry) => `"${entry.netId}","${entry.score}","${entry.comments}"`)
+    .map((entry) => `"${entry.netId}","${entry.score}","${entry.comments || ""}"`)
     .join("\n");
   return header + values;
 }
@@ -239,6 +239,7 @@ function insertOrUpdateGradeEntries(
       gradesData.push({ netId: newEntry.netId, score: newEntry.score, comments: "" });
     } else {
       oldEntry.score = newEntry.score;
+      oldEntry.comments = newEntry.comments || "";
     }
   }
   return gradesData;
@@ -247,9 +248,8 @@ function insertOrUpdateGradeEntries(
 function parseGradesCsvData(csvData: string) {
   const parseResult = parse(csvData, {
     columns: true,
-    from_line: 2, // Skip headers line
     skip_empty_lines: true,
-  }).map((x: any) => ({ netId: x.netid, score: x.score, comments: x.comments })) as GradeEntry[];
+  }).map((x: any) => ({ netId: x.netid, score: parseInt(x.score, 10), comments: x.comments || "" })) as GradeEntry[];
   return parseResult;
 }
 

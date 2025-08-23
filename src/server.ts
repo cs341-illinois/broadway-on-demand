@@ -43,7 +43,12 @@ async function start() {
     trustProxy: true,
   });
   server.jobSockets = new Map<string, Set<WebSocket>>();
-  server.prismaClient = new PrismaClient();
+  server.prismaClient = new PrismaClient({
+    transactionOptions: {
+      maxWait: 10_000,
+      timeout: 20_000
+    }
+  });
   server.redisClient = createClient({ url: config.REDIS_URL });
   await server.redisClient.connect();
   let redisStore = new RedisStore({

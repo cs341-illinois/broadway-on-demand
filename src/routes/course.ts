@@ -477,7 +477,7 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
           await updateStudentGradesToGithub({
             redisClient,
             assignmentId,
-            gradeData: body,
+            gradeData: body.map(x => ({ ...x, comments: x.comments || "" })),
             logger,
             commitMessage: `Grade Upload for assignment ${assignmentId} by ${requestorNetId}\n\nRequest ID: ${request.id}`,
             orgName: courseData.githubOrg,

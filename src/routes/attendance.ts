@@ -278,7 +278,7 @@ const attendanceRoutes: FastifyPluginAsync = async (fastify, _options) => {
             redisClient,
             assignmentId,
             gradeData,
-            commitMessage: `Publish grades for ${assignmentId}\n\nRequest ID ${request.id}`,
+            commitMessage: `Submit data for ${assignmentId} by ${createdBy}\n\nRequest ID ${request.id}`,
             githubToken,
             orgName: githubOrg,
             repoName: gradesRepo,
