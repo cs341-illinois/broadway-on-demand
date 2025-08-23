@@ -289,7 +289,7 @@ const rosterRoutes: FastifyPluginAsync = async (fastify, _options) => {
               enablePromises.push(
                 tx.users.upsert({
                   where: {
-                    netId_courseId: { courseId, netId: user.netId },
+                    courseId_uin: { courseId, uin: user.uin },
                   },
                   create: data,
                   update: data,
