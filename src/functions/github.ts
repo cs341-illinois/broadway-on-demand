@@ -211,7 +211,7 @@ async function getGradeFileFromGithub({
 function generateGradesCsv(gradesData: GradeEntry[]) {
   const header = `"netid","score","comments"\n`;
   const values = gradesData
-    .map((entry) => `"${entry.netId}","${entry.score}","${entry.comments || ""}"`)
+    .map((entry) => `"${entry.netId}","${entry.score}","${(entry.comments || "").replaceAll(`"`, `""`)}"`)
     .join("\n");
   return header + values;
 }
