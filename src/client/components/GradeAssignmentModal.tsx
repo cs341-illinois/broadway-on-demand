@@ -1,12 +1,10 @@
-import moment from "moment-timezone";
 import { Modal, Button } from "react-bootstrap";
-import { dateTimeFormatString } from "../utils";
 import { AssignmentInformationResponse } from "../../types/assignment";
 
 interface GradeAssignmentModalProps {
   show: boolean;
   handleClose: () => void;
-  handleGrade: () => void;
+  handleGrade: (latestCommitHash: string) => void;
   latestCommit: AssignmentInformationResponse["latestCommit"];
 }
 
@@ -42,7 +40,7 @@ export default function GradeAssignmentModal({
         <Button onClick={handleClose} variant="secondary">
           Close
         </Button>
-        <Button onClick={handleGrade} variant="primary">
+        <Button onClick={() => handleGrade(latestCommit?.sha || "")} variant="primary">
           Yes, Grade Now
         </Button>
       </Modal.Footer>

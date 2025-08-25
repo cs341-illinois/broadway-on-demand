@@ -434,7 +434,7 @@ export default function AssignmentHomePage(): JSX.Element {
   }, [courseId, assignmentId, user?.id, resourceKey]);
 
   const handleGradeRequest = async (
-    _modalSelectedDueDate?: Date,
+    latestCommitHash: string
   ): Promise<void> => {
     if (!courseId || !assignmentId) {
       showAlert("Course ID or Assignment ID is missing.", "danger");
@@ -474,7 +474,7 @@ export default function AssignmentHomePage(): JSX.Element {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ dueDate: commitIsoTimestamp }),
+          body: JSON.stringify({ dueDate: commitIsoTimestamp, expectedCommitHash: latestCommitHash }),
         },
       );
 
@@ -494,7 +494,7 @@ export default function AssignmentHomePage(): JSX.Element {
     } catch (e: unknown) {
       const errorMessage =
         e instanceof Error ? e.message : "An unexpected error occurred.";
-      showAlert(`Grading job failed to start: ${errorMessage}`, "danger");
+      showAlert(`Grading job failed to start: ${JSON.parse(errorMessage).message}`, "danger");
     } finally {
       setGradeModal(false);
     }

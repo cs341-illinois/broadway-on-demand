@@ -321,7 +321,7 @@ export default function CourseHomePage(): JSX.Element {
     } catch (e: unknown) {
       console.error("Failed to create assignment:", e);
       const errorMessage = e instanceof Error ? e.message : String(e);
-      showAlert(`Error creating assignment: ${errorMessage}`, "danger");
+      showAlert(`Error creating assignment: ${JSON.parse(errorMessage).message}`, "danger");
     }
   };
 

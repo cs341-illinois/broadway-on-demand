@@ -667,6 +667,7 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
             .refine((val) => new Date(val) <= new Date(), {
               message: "Due date must not be in the future.",
             }),
+          expectedCommitHash: z.string().min(1)
         }),
         response: {
           201: z.null(),
@@ -676,7 +677,7 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
     async (request, reply) => {
       const netId = request.session.user.email.replace("@illinois.edu", "");
       const { courseId, assignmentId } = request.params;
-      const { dueDate: userDueDate } = request.body;
+      const { dueDate: userDueDate, expectedCommitHash } = request.body;
       const dueAtTimestamp = new Date(userDueDate).toISOString();
       const courseRoles = getCourseRoles(courseId, request.session.user.roles);
       const { jenkinsBaseUrl, jenkinsToken, courseTimezone } =
@@ -726,6 +727,7 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
               jenkinsToken,
               type: JobType.STUDENT_INITIATED,
               gradingRunId: result.id,
+              expectedCommitHash,
               logger: fastify.log,
             });
             return result;
@@ -799,6 +801,7 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
                 jenkinsToken,
                 type: JobType.STUDENT_INITIATED,
                 gradingRunId: result.id,
+                expectedCommitHash,
                 logger: fastify.log,
               });
               return result;
