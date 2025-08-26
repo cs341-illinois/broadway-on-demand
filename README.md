@@ -91,6 +91,12 @@ This will start the development server with **UI hot reloading enabled** (change
 - `yarn prisma:studio` - Open Prisma Studio to view and edit database data
 - `yarn setup` - Configure Git to use the blame ignore file
 
+## Creating a course
+Run the course creation CLI:
+```
+npx tsx src/scripts/createCourse.ts
+```
+
 ## Deployment
 
 To deploy the application to a production environment:
