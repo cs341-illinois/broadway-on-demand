@@ -4,6 +4,7 @@ import {
   Card,
   Col,
   Container,
+  Modal, // 👈 ADDED: Import Modal
   OverlayTrigger,
   Row,
   Table,
@@ -85,7 +86,8 @@ interface AssignmentContentProps {
   courseId: string;
   assignmentId: string;
   isStaff: boolean;
-  onShowGradeModal: () => void;
+  // 👇 MODIFIED: Prop name and type changed to handle click events
+  onGradeClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
   navigate: ReturnType<typeof useNavigate>;
 }
 
@@ -94,7 +96,7 @@ function AssignmentContent({
   courseId,
   assignmentId,
   isStaff,
-  onShowGradeModal,
+  onGradeClick, // 👈 MODIFIED: Prop name changed
   navigate,
 }: AssignmentContentProps) {
   const [assignmentData, setAssignmentData] =
@@ -320,7 +322,7 @@ function AssignmentContent({
                       </span>
                     </OverlayTrigger>
                     <Button
-                      onClick={onShowGradeModal}
+                      onClick={onGradeClick} // 👈 MODIFIED: Using the new event handler
                       className="w-100"
                       disabled={!assignmentData.latestCommit}
                     >
@@ -386,6 +388,45 @@ function AssignmentContent({
   );
 }
 
+// ----------------------------------------------------------------
+// --- 👇 ADDED: New Confirmation Modal Component ---
+// ----------------------------------------------------------------
+interface ConfirmRerunModalProps {
+  show: boolean;
+  handleClose: () => void;
+  handleConfirm: () => void;
+}
+
+function ConfirmRerunModal({
+  show,
+  handleClose,
+  handleConfirm,
+}: ConfirmRerunModalProps): JSX.Element {
+  return (
+    <Modal show={show} onHide={handleClose}>
+      <Modal.Header closeButton>
+        <Modal.Title>Confirm Grading Run</Modal.Title>
+      </Modal.Header>
+      <Modal.Body>
+        <p>
+          You haven't made any commits since your last grading run.
+        </p>
+        <p className="mb-0">
+          Do you still want to use another run on the same version of your code?
+        </p>
+      </Modal.Body>
+      <Modal.Footer>
+        <Button variant="secondary" onClick={handleClose}>
+          Cancel
+        </Button>
+        <Button variant="danger" onClick={handleConfirm}>
+          Yes, Grade Anyway
+        </Button>
+      </Modal.Footer>
+    </Modal>
+  );
+}
+
 export default function AssignmentHomePage(): JSX.Element {
   const { user } = useAuth();
   const { courseId = "", assignmentId = "" } = useParams<{
@@ -397,6 +438,9 @@ export default function AssignmentHomePage(): JSX.Element {
 
   const [gradeModal, setGradeModal] = useState<boolean>(false);
   const [resourceKey, setResourceKey] = useState<number>(0);
+  // 👇 ADDED: State for the new confirmation modal
+  const [showConfirmModal, setShowConfirmModal] = useState<boolean>(false);
+
   const courseRoles = useMemo(() => {
     if (!user?.roles) return [];
     return getCourseRoles(courseId, user.roles);
@@ -432,6 +476,39 @@ export default function AssignmentHomePage(): JSX.Element {
       getAssignmentData(courseId, assignmentId),
     );
   }, [courseId, assignmentId, user?.id, resourceKey]);
+
+
+  const handleGradeClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+    if (event.shiftKey) {
+      setGradeModal(true);
+      return;
+    }
+
+    try {
+      const data = assignmentResource.read();
+      const latestCommitDate = data.latestCommit?.date;
+
+      if (data.studentRuns.length === 0 || !latestCommitDate) {
+        setGradeModal(true);
+        return;
+      }
+
+      const latestRun = [...data.studentRuns].sort(
+        (a, b) => new Date(b.scheduledAt).getTime() - new Date(a.scheduledAt).getTime(),
+      )[0];
+
+      const noNewChanges = new Date(latestCommitDate) <= new Date(latestRun.scheduledAt);
+
+      if (noNewChanges) {
+        setShowConfirmModal(true);
+      } else {
+        setGradeModal(true);
+      }
+    } catch (e) {
+      console.error("Error reading assignment data for confirmation:", e);
+      setGradeModal(true);
+    }
+  };
 
   const handleGradeRequest = async (
     latestCommitHash: string
@@ -528,16 +605,25 @@ export default function AssignmentHomePage(): JSX.Element {
             courseId={courseId}
             assignmentId={assignmentId}
             isStaff={isStaff}
-            onShowGradeModal={() => setGradeModal(true)}
+            onGradeClick={handleGradeClick} // 👈 MODIFIED: Pass the new handler
             navigate={navigate}
           />
         </Suspense>
       </ErrorBoundary>
+
       <GradeAssignmentModal
         show={gradeModal}
         latestCommit={latestCommitForModal}
         handleClose={() => setGradeModal(false)}
         handleGrade={handleGradeRequest}
+      />
+      <ConfirmRerunModal
+        show={showConfirmModal}
+        handleClose={() => setShowConfirmModal(false)}
+        handleConfirm={() => {
+          setShowConfirmModal(false);
+          setGradeModal(true); // Open the main grade modal on confirm
+        }}
       />
     </div>
   );
