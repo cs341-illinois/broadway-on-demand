@@ -10,7 +10,7 @@ import { DatabaseFetchError } from "../errors/index.js";
 type UpdateStudentGradesGithubInput = {
   redisClient: RedisClientType;
   assignmentId: string;
-  gradeData: { netId: string; score: number, comments?: string }[];
+  gradeData: { netId: string; score: number; comments?: string }[];
   githubToken: string;
   commitMessage: string;
   overwrite?: boolean;
@@ -49,20 +49,20 @@ export async function updateStudentGradesToGithub({
       auth: githubToken,
     });
     try {
-      await githubClient.rest.orgs.get({ org: orgName })
+      await githubClient.rest.orgs.get({ org: orgName });
     } catch (e) {
       logger.error(e);
       throw new DatabaseFetchError({
-        message: "Failed to get GitHub organization."
-      })
+        message: "Failed to get GitHub organization.",
+      });
     }
     try {
-      await githubClient.rest.repos.get({ owner: orgName, repo: repoName })
+      await githubClient.rest.repos.get({ owner: orgName, repo: repoName });
     } catch (e) {
       logger.error(e);
       throw new DatabaseFetchError({
-        message: "Failed to get GitHub repository."
-      })
+        message: "Failed to get GitHub repository.",
+      });
     }
     try {
       logger.debug(`Acquiring lock ${lockId}`);
@@ -155,18 +155,20 @@ async function getFileFromGithub({
   sha: null | string;
 }> {
   try {
-    const res = await githubClient.rest.repos.getContent({
-      owner: githubOrg,
-      repo: githubRepo,
-      path: filePath,
-    }).catch(error => {
-      if (error.status && error.status === 404) {
-        return null;
-      }
-      throw error;
-    });
+    const res = await githubClient.rest.repos
+      .getContent({
+        owner: githubOrg,
+        repo: githubRepo,
+        path: filePath,
+      })
+      .catch((error) => {
+        if (error.status && error.status === 404) {
+          return null;
+        }
+        throw error;
+      });
     if (res === null) {
-      return { content: null, sha: null }
+      return { content: null, sha: null };
     }
     const data = res.data as OctokitFileData;
     if (data.type !== "file") {
@@ -211,7 +213,10 @@ async function getGradeFileFromGithub({
 function generateGradesCsv(gradesData: GradeEntry[]) {
   const header = `"netid","score","comments"\n`;
   const values = gradesData
-    .map((entry) => `"${entry.netId}","${entry.score}","${(entry.comments || "").replaceAll(`"`, `""`)}"`)
+    .map(
+      (entry) =>
+        `"${entry.netId}","${entry.score}","${(entry.comments || "").replaceAll(`"`, `""`)}"`,
+    )
     .join("\n");
   return header + values;
 }
@@ -236,7 +241,11 @@ function insertOrUpdateGradeEntries(
   for (const newEntry of newData) {
     const oldEntry = gradesData.find((entry) => entry.netId === newEntry.netId);
     if (oldEntry == null) {
-      gradesData.push({ netId: newEntry.netId, score: newEntry.score, comments: "" });
+      gradesData.push({
+        netId: newEntry.netId,
+        score: newEntry.score,
+        comments: "",
+      });
     } else {
       oldEntry.score = newEntry.score;
       oldEntry.comments = newEntry.comments || "";
@@ -249,7 +258,11 @@ function parseGradesCsvData(csvData: string) {
   const parseResult = parse(csvData, {
     columns: true,
     skip_empty_lines: true,
-  }).map((x: any) => ({ netId: x.netid, score: parseInt(x.score, 10), comments: x.comments || "" })) as GradeEntry[];
+  }).map((x: any) => ({
+    netId: x.netid,
+    score: parseInt(x.score, 10),
+    comments: x.comments || "",
+  })) as GradeEntry[];
   return parseResult;
 }
 
@@ -336,20 +349,20 @@ export async function overwriteRosterToGithub({
     auth: githubToken,
   });
   try {
-    await githubClient.rest.orgs.get({ org: orgName })
+    await githubClient.rest.orgs.get({ org: orgName });
   } catch (e) {
     logger.error(e);
     throw new DatabaseFetchError({
-      message: "Failed to get GitHub organization."
-    })
+      message: "Failed to get GitHub organization.",
+    });
   }
   try {
-    await githubClient.rest.repos.get({ owner: orgName, repo: repoName })
+    await githubClient.rest.repos.get({ owner: orgName, repo: repoName });
   } catch (e) {
     logger.error(e);
     throw new DatabaseFetchError({
-      message: "Failed to get GitHub repository."
-    })
+      message: "Failed to get GitHub repository.",
+    });
   }
   await retryAsync(async () => {
     const lockTs = new Date().getTime();

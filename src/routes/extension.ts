@@ -120,8 +120,10 @@ const extensionRoutes: FastifyPluginAsync = async (fastify, _options) => {
                 new Date(x.dueAt) > new Date(),
             )
             .filter((x) => {
-              return moment(x.dueAt).add({ hours: numExtensionHours }).toDate() <
-                courseCutoff;
+              return (
+                moment(x.dueAt).add({ hours: numExtensionHours }).toDate() <
+                courseCutoff
+              );
             });
           return {
             courseName,
@@ -225,22 +227,30 @@ const extensionRoutes: FastifyPluginAsync = async (fastify, _options) => {
             0,
             numExtensions - userAppliedExtensions.length,
           );
-          const visibleAssignments = (
-            await getAutogradableAssignments({
-              courseId,
-              prismaClient: fastify.prismaClient,
-              showInvisible: false,
-              showUnextendable: false,
-            })
-          )
+          const visibleAssignmentsRaw = await getAutogradableAssignments({
+            courseId,
+            prismaClient: fastify.prismaClient,
+            showInvisible: false,
+            showUnextendable: false,
+          });
+          const visibleAssignments = visibleAssignmentsRaw
+            .filter(
+              (x) =>
+                !userAppliedExtensions
+                  .map((x) => x.assignmentId)
+                  .includes(x.id),
+            )
+            .filter(
+              (x) =>
+                new Date(x.openAt) < new Date() &&
+                new Date(x.dueAt) > new Date(),
+            )
             .filter((x) => {
-              new Date(x.openAt) < new Date() && new Date(x.dueAt) > new Date();
-            })
-            .filter((x) => {
-              moment(x.dueAt).add({ hours: numExtensionHours }).toDate() <
-                courseCutoff;
+              return (
+                moment(x.dueAt).add({ hours: numExtensionHours }).toDate() <
+                courseCutoff
+              );
             });
-
           const data = {
             courseName,
             courseCutoff: courseCutoff.toISOString(),
@@ -458,14 +468,20 @@ const extensionRoutes: FastifyPluginAsync = async (fastify, _options) => {
     },
     async (request, reply) => {
       const { courseId, assignmentId, extensionId } = request.params;
-      await fastify.prismaClient.extensions.delete({
-        where: {
-          courseId, assignmentId, id: extensionId
-        }
-      }).catch(e => {
-        fastify.log.error(e);
-        throw new DatabaseDeleteError({ message: "Failed to delete extension." })
-      })
+      await fastify.prismaClient.extensions
+        .delete({
+          where: {
+            courseId,
+            assignmentId,
+            id: extensionId,
+          },
+        })
+        .catch((e) => {
+          fastify.log.error(e);
+          throw new DatabaseDeleteError({
+            message: "Failed to delete extension.",
+          });
+        });
       return reply.status(201).send();
     },
   );

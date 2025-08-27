@@ -147,7 +147,13 @@ const gradesRoutes: FastifyPluginAsync = async (fastify, _options) => {
               await updateStudentGradesToGithub({
                 redisClient: fastify.redisClient,
                 assignmentId,
-                gradeData: [{ netId, score: updateData.score, comments: updateData.comments || "" }],
+                gradeData: [
+                  {
+                    netId,
+                    score: updateData.score,
+                    comments: updateData.comments || "",
+                  },
+                ],
                 githubToken,
                 orgName: githubOrg,
                 repoName: gradesRepo,

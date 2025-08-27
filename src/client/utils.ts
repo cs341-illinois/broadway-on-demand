@@ -138,16 +138,33 @@ export function downloadText(filename: string, text: string) {
 
 export function getTimeZoneName() {
   const now = new Date();
-  const timeZoneFormatter = new Intl.DateTimeFormat("en-US", { timeZoneName: "long" });
+  const timeZoneFormatter = new Intl.DateTimeFormat("en-US", {
+    timeZoneName: "long",
+  });
   const parts = timeZoneFormatter.formatToParts(now);
   if (!parts) {
     throw new Error("Failed to get user time zone.");
   }
-  const timeZonePart = parts.find(part => part.type === 'timeZoneName');
+  const timeZonePart = parts.find((part) => part.type === "timeZoneName");
 
   if (!timeZonePart) {
     throw new Error("Could not find time zone name part.");
   }
 
   return timeZonePart.value;
+}
+
+export async function getSafeErrorResponse(
+  response: Response,
+  defaultErrorMessage?: string,
+) {
+  let errorResponse;
+  try {
+    errorResponse = (await response.json()) as { message: string };
+  } catch (e) {
+    errorResponse = {
+      message: defaultErrorMessage || "An unknown error occurred.",
+    };
+  }
+  return errorResponse;
 }

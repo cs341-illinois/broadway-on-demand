@@ -123,8 +123,9 @@ export default function AssignmentGradesPage() {
       const currentCourseInfo = getCourseInfo(user, courseId);
       setCourseInfo(currentCourseInfo);
       setCourseInfoSessionStorage(currentCourseInfo!);
-      document.title = `Manage Assignment Grades | ${currentCourseInfo?.courseName || "Course"
-        }`;
+      document.title = `Manage Assignment Grades | ${
+        currentCourseInfo?.courseName || "Course"
+      }`;
     }
   }, [courseId, user, navigate, courseInfo?.courseName]);
 
@@ -371,7 +372,7 @@ export default function AssignmentGradesPage() {
       try {
         const errorData = await response.json();
         errorMsg = errorData.message || errorData.detail || errorMsg;
-      } catch (e) { }
+      } catch (e) {}
       throw new Error(errorMsg);
     }
     if (response.status === 201) {
@@ -522,10 +523,9 @@ export default function AssignmentGradesPage() {
                 disabled={isParsingCsv || isUploadingGrades}
               />
               <p className="text-muted small">
-                All timestamps shown in your local timezone (
-                {getTimeZoneName()}). Uploaded
-                CSV should contain 'netid', 'score', and optionally 'comments'
-                columns.
+                All timestamps shown in your local timezone ({getTimeZoneName()}
+                ). Uploaded CSV should contain 'netid', 'score', and optionally
+                'comments' columns.
               </p>
               {assignmentInfo.grades.length > 0 ? (
                 <Table striped bordered hover responsive size="sm">
@@ -559,11 +559,18 @@ export default function AssignmentGradesPage() {
                           </p>
                         </td>
                         <td>
-                          {!grade.updatedAt && <p className="text-muted mb-0 fst-italic">Never</p>}
-                          {grade.updatedAt && moment(grade.updatedAt).format(dateTimeFormatString)}
-                          {grade.updatedAt && <p className="text-muted small mb-0">
-                            ({moment(grade.updatedAt).fromNow()})
-                          </p>}
+                          {!grade.updatedAt && (
+                            <p className="text-muted mb-0 fst-italic">Never</p>
+                          )}
+                          {grade.updatedAt &&
+                            moment(grade.updatedAt).format(
+                              dateTimeFormatString,
+                            )}
+                          {grade.updatedAt && (
+                            <p className="text-muted small mb-0">
+                              ({moment(grade.updatedAt).fromNow()})
+                            </p>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -581,7 +588,10 @@ export default function AssignmentGradesPage() {
             <ManualAssignmentModal
               show={manualAssignmentModal}
               initialData={{
-                name: debouncedAssignmentId.split("_").map(x => capitalizeFirstLetterOnly(x)).join(" "),
+                name: debouncedAssignmentId
+                  .split("_")
+                  .map((x) => capitalizeFirstLetterOnly(x))
+                  .join(" "),
                 id: debouncedAssignmentId,
                 visibility: AssignmentVisibility.DEFAULT,
                 category: Category.OTHER,

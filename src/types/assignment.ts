@@ -39,10 +39,10 @@ export const JobStatusColors: HumanReadableEnum<typeof JobStatus> = {
 };
 
 export const AssignmentQuotaLabels: HumanReadableEnum<typeof AssignmentQuota> =
-{
-  DAILY: "per day",
-  TOTAL: "total",
-};
+  {
+    DAILY: "per day",
+    TOTAL: "total",
+  };
 
 export const CategoryLabels: HumanReadableEnum<typeof Category> = {
   LAB: "Lab",

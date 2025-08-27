@@ -164,20 +164,20 @@ async function deleteExtension(
   extensionId: string,
 ): Promise<AssignmentExtensionsGetResponse> {
   const response = await fetch(
-    formulateUrl(`api/v1/extension/${courseId}/assignment/${assignmentId}/id/${extensionId}`),
-    { method: "DELETE" }
+    formulateUrl(
+      `api/v1/extension/${courseId}/assignment/${assignmentId}/id/${extensionId}`,
+    ),
+    { method: "DELETE" },
   );
   if (!response.ok) {
     const errorText = await response
-      .json().then(i => i.message)
+      .json()
+      .then((i) => i.message)
       .catch(() => `HTTP error ${response.status}`);
-    throw new Error(
-      `Failed to delete extension - ${errorText}`,
-    );
+    throw new Error(`Failed to delete extension - ${errorText}`);
   }
   return (await response.json()) as AssignmentExtensionsGetResponse;
 }
-
 
 interface ManageAssignmentContentProps {
   pageResource: Resource<ManageAssignmentPageData>;
@@ -293,7 +293,9 @@ function ManageAssignmentContent({
   const [extensionModalOpen, setExtensionModalOpen] = useState(false);
   const [assignmentModalOpen, setAssignmentModalOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  const [deleteExtensionInfo, setDeleteExtensionInfo] = useState<false | { id: string, netId: string }>(false);
+  const [deleteExtensionInfo, setDeleteExtensionInfo] = useState<
+    false | { id: string; netId: string }
+  >(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
   const handleUpdateAssignment = async (data: UpdateAssignmentBody) => {
@@ -444,7 +446,10 @@ function ManageAssignmentContent({
                 </td>
                 <td>
                   <p className={`mb-0 text-${JobStatusColors[run.status]}`}>
-                    {JobStatusLabels[run.status].replace(JobStatusLabels.PENDING, "Scheduled")}
+                    {JobStatusLabels[run.status].replace(
+                      JobStatusLabels.PENDING,
+                      "Scheduled",
+                    )}
                   </p>
                 </td>
                 <td>
@@ -515,8 +520,7 @@ function ManageAssignmentContent({
       <Container className="p-2 flex-grow-1">
         <h2>{assignmentDetails.name}</h2>
         <p className="text-muted">
-          All timestamps shown in your local timezone (
-          {getTimeZoneName()}).
+          All timestamps shown in your local timezone ({getTimeZoneName()}).
         </p>
         <Row className="pt-3">
           <Col md={isAdmin ? 9 : 12} xs={12} className="mb-3 mb-md-0">
@@ -608,7 +612,13 @@ function ManageAssignmentContent({
                             rel="noopener noreferrer"
                             size="sm"
                             variant="outline-danger"
-                            onClick={(e) => { e.preventDefault(); setDeleteExtensionInfo({ id: x.id, netId: x.netId }) }}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              setDeleteExtensionInfo({
+                                id: x.id,
+                                netId: x.netId,
+                              });
+                            }}
                           >
                             Delete
                           </Button>
@@ -642,7 +652,13 @@ function ManageAssignmentContent({
                     )}
                     {isAdmin && (
                       <Button
-                        onClick={() => navigate(formulateUrl(`dashboard/${courseId}/assignmentGrades?assignmentId=${assignmentId}`))}
+                        onClick={() =>
+                          navigate(
+                            formulateUrl(
+                              `dashboard/${courseId}/assignmentGrades?assignmentId=${assignmentId}`,
+                            ),
+                          )
+                        }
                         disabled={isProcessing}
                       >
                         View Grades
@@ -722,7 +738,11 @@ function ManageAssignmentContent({
           }
         }}
         title="Confirm Delete Extension"
-        message={deleteExtensionInfo ? `Are you sure you would like to delete this extension for ${deleteExtensionInfo.netId}? The data will be irrecoverable!` : null}
+        message={
+          deleteExtensionInfo
+            ? `Are you sure you would like to delete this extension for ${deleteExtensionInfo.netId}? The data will be irrecoverable!`
+            : null
+        }
       />
       <JobLogModal
         show={showJobLogModal}

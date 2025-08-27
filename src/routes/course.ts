@@ -382,24 +382,28 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
         createdAt: x.createdAt.toISOString(),
         updatedAt: x.updatedAt.toISOString(),
       }));
-      const nonPublishedStudents = await fastify.prismaClient.users.findMany({
-        where: {
-          courseId,
-          role: Role.STUDENT,
-          netId: { notIn: publishedGrades.map(x => x.netId) },
-          enabled: true
-        },
-        select: {
-          netId: true
-        }
-      }).catch(e => {
-        request.log.error(e);
-        throw new DatabaseFetchError({ message: "Failed to get course roster." })
-      });
-      const baselineScores = nonPublishedStudents.map(x => ({
+      const nonPublishedStudents = await fastify.prismaClient.users
+        .findMany({
+          where: {
+            courseId,
+            role: Role.STUDENT,
+            netId: { notIn: publishedGrades.map((x) => x.netId) },
+            enabled: true,
+          },
+          select: {
+            netId: true,
+          },
+        })
+        .catch((e) => {
+          request.log.error(e);
+          throw new DatabaseFetchError({
+            message: "Failed to get course roster.",
+          });
+        });
+      const baselineScores = nonPublishedStudents.map((x) => ({
         netId: x.netId,
         score: 0,
-        comments: "No score published."
+        comments: "No score published.",
       }));
       const grades = [...publishedGrades, ...baselineScores];
       const response = {
@@ -445,23 +449,25 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
           gradesRepo: true,
         },
       });
-      const courseRoster = await fastify.prismaClient.users.findMany({
-        select: {
-          netId: true
-        },
-        where: {
-          courseId,
-          enabled: true
-        }
-      }).catch(e => {
-        request.log.error(e);
-        throw new DatabaseFetchError({
-          message: "Could not get course roster."
+      const courseRoster = await fastify.prismaClient.users
+        .findMany({
+          select: {
+            netId: true,
+          },
+          where: {
+            courseId,
+            enabled: true,
+          },
         })
-      })
-      const courseNetIds = new Set(courseRoster.map(x => x.netId));
+        .catch((e) => {
+          request.log.error(e);
+          throw new DatabaseFetchError({
+            message: "Could not get course roster.",
+          });
+        });
+      const courseNetIds = new Set(courseRoster.map((x) => x.netId));
       // Only publish records that are in the roster.
-      body = body.filter(x => courseNetIds.has(x.netId));
+      body = body.filter((x) => courseNetIds.has(x.netId));
       if (!courseData) {
         throw new NotFoundError({ endpointName: request.url });
       }
@@ -477,7 +483,7 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
           await updateStudentGradesToGithub({
             redisClient,
             assignmentId,
-            gradeData: body.map(x => ({ ...x, comments: x.comments || "" })),
+            gradeData: body.map((x) => ({ ...x, comments: x.comments || "" })),
             logger,
             commitMessage: `Grade Upload for assignment ${assignmentId} by ${requestorNetId}\n\nRequest ID: ${request.id}`,
             orgName: courseData.githubOrg,
@@ -667,7 +673,7 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
             .refine((val) => new Date(val) <= new Date(), {
               message: "Due date must not be in the future.",
             }),
-          expectedCommitHash: z.string().min(1)
+          expectedCommitHash: z.string().min(1),
         }),
         response: {
           201: z.null(),

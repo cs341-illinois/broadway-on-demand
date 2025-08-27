@@ -1,8 +1,8 @@
 {
-    "recommendations": [
-        "editorconfig.editorconfig",
-        "rvest.vs-code-prettier-eslint",
-        "eamodio.gitlens",
-        "prisma.prisma"
-    ]
+  "recommendations": [
+    "editorconfig.editorconfig",
+    "rvest.vs-code-prettier-eslint",
+    "eamodio.gitlens",
+    "prisma.prisma"
+  ]
 }

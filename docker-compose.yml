@@ -62,7 +62,6 @@ services:
       retries: 3
       start_period: 90s
 
-
 volumes:
   db_data:
   redis_data:

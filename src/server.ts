@@ -46,8 +46,8 @@ async function start() {
   server.prismaClient = new PrismaClient({
     transactionOptions: {
       maxWait: 10_000,
-      timeout: 20_000
-    }
+      timeout: 20_000,
+    },
   });
   server.redisClient = createClient({ url: config.REDIS_URL });
   await server.redisClient.connect();

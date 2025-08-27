@@ -71,7 +71,10 @@ export default function ManualAssignmentModal({
           .replace(/\s+/g, "_")
           .replaceAll("part_", "pt")
           .replaceAll("week_", "week");
-        setValue("id", generatedId, { shouldValidate: true, shouldDirty: true });
+        setValue("id", generatedId, {
+          shouldValidate: true,
+          shouldDirty: true,
+        });
       }
     }
   }, [nameValue, setValue, verb]);

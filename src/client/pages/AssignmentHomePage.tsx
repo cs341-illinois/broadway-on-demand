@@ -202,8 +202,7 @@ function AssignmentContent({
           {moment(assignmentData.dueAt).format(dateTimeFormatString)}).
         </p>
         <p className="text-muted">
-          All timestamps shown in your local timezone (
-          {getTimeZoneName()}).
+          All timestamps shown in your local timezone ({getTimeZoneName()}).
         </p>
         <Row className="mb-3">
           {isStaff && (
@@ -313,7 +312,7 @@ function AssignmentContent({
                                 .numRunsRemaining === "infinity"
                                 ? Infinity
                                 : assignmentData.gradingEligibility
-                                  .numRunsRemaining,
+                                    .numRunsRemaining,
                               true,
                             ).replace("Infinity", "∞")}
                           </b>{" "}
@@ -408,9 +407,7 @@ function ConfirmRerunModal({
         <Modal.Title>Confirm Grading Run</Modal.Title>
       </Modal.Header>
       <Modal.Body>
-        <p>
-          You haven't made any commits since your last grading run.
-        </p>
+        <p>You haven't made any commits since your last grading run.</p>
         <p className="mb-0">
           Do you still want to use another run on the same version of your code?
         </p>
@@ -477,7 +474,6 @@ export default function AssignmentHomePage(): JSX.Element {
     );
   }, [courseId, assignmentId, user?.id, resourceKey]);
 
-
   const handleGradeClick = (event: React.MouseEvent<HTMLButtonElement>) => {
     if (event.shiftKey) {
       setGradeModal(true);
@@ -494,10 +490,12 @@ export default function AssignmentHomePage(): JSX.Element {
       }
 
       const latestRun = [...data.studentRuns].sort(
-        (a, b) => new Date(b.scheduledAt).getTime() - new Date(a.scheduledAt).getTime(),
+        (a, b) =>
+          new Date(b.scheduledAt).getTime() - new Date(a.scheduledAt).getTime(),
       )[0];
 
-      const noNewChanges = new Date(latestCommitDate) <= new Date(latestRun.scheduledAt);
+      const noNewChanges =
+        new Date(latestCommitDate) <= new Date(latestRun.scheduledAt);
 
       if (noNewChanges) {
         setShowConfirmModal(true);
@@ -511,7 +509,7 @@ export default function AssignmentHomePage(): JSX.Element {
   };
 
   const handleGradeRequest = async (
-    latestCommitHash: string
+    latestCommitHash: string,
   ): Promise<void> => {
     if (!courseId || !assignmentId) {
       showAlert("Course ID or Assignment ID is missing.", "danger");
@@ -551,7 +549,10 @@ export default function AssignmentHomePage(): JSX.Element {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ dueDate: commitIsoTimestamp, expectedCommitHash: latestCommitHash }),
+          body: JSON.stringify({
+            dueDate: commitIsoTimestamp,
+            expectedCommitHash: latestCommitHash,
+          }),
         },
       );
 
@@ -571,7 +572,10 @@ export default function AssignmentHomePage(): JSX.Element {
     } catch (e: unknown) {
       const errorMessage =
         e instanceof Error ? e.message : "An unexpected error occurred.";
-      showAlert(`Grading job failed to start: ${JSON.parse(errorMessage).message}`, "danger");
+      showAlert(
+        `Grading job failed to start: ${JSON.parse(errorMessage).message}`,
+        "danger",
+      );
     } finally {
       setGradeModal(false);
     }

@@ -45,7 +45,7 @@ async function getCourseData(
     try {
       const errorData = await response.json();
       errorMessage = errorData.message || errorData.detail || errorMessage;
-    } catch (e) { }
+    } catch (e) {}
     throw new Error(errorMessage);
   }
   return (await response.json()) as CourseInformationResponse;
@@ -132,7 +132,7 @@ function CourseContent({
                         {x.quotaAmount}{" "}
                         {
                           AssignmentQuotaLabels[
-                          x.quotaPeriod as AssignmentQuota
+                            x.quotaPeriod as AssignmentQuota
                           ]
                         }
                       </td>
@@ -258,8 +258,7 @@ function CourseContent({
         </Row>
         <Row>
           <p className="text-muted mt-3">
-            All timestamps shown in your local timezone (
-            {getTimeZoneName()}).
+            All timestamps shown in your local timezone ({getTimeZoneName()}).
           </p>
         </Row>
       </Container>
@@ -321,7 +320,10 @@ export default function CourseHomePage(): JSX.Element {
     } catch (e: unknown) {
       console.error("Failed to create assignment:", e);
       const errorMessage = e instanceof Error ? e.message : String(e);
-      showAlert(`Error creating assignment: ${JSON.parse(errorMessage).message}`, "danger");
+      showAlert(
+        `Error creating assignment: ${JSON.parse(errorMessage).message}`,
+        "danger",
+      );
     }
   };
 

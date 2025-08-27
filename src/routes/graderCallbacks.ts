@@ -270,40 +270,46 @@ const graderCallbackRoutes: FastifyPluginAsync = async (fastify, _options) => {
       const { status, buildUrl } = request.body;
       const { id } = request.params;
       try {
-        await fastify.prismaClient.$transaction(async (tx) => {
-          const currentStatus = await tx.job.findFirst({
-            where: { id },
-            select: { status: true }
-          });
-          const currentJobStatus = (currentStatus || { status: 'none' }).status;
-          const validStateTransitions = VALID_JOB_STATUS_TRANSITIONS[currentJobStatus];
-          if (!(validStateTransitions.includes(status))) {
-            throw new ValidationError({ message: `Invalid state transition. Valid transitions are: ${JSON.stringify(validStateTransitions)}.` })
-          }
-          await tx.job
-            .update({
-              where: {
-                id,
-              },
-              data: {
-                status,
-                buildUrl,
-              },
-            })
-            .catch((e) => {
-              fastify.log.error(e);
-              throw new DatabaseInsertError({
-                message: "Could not update status.",
-              });
+        await fastify.prismaClient
+          .$transaction(async (tx) => {
+            const currentStatus = await tx.job.findFirst({
+              where: { id },
+              select: { status: true },
             });
-        }).catch((e) => {
-          if (e instanceof BaseError) {
-            throw e;
-          }
-          throw new DatabaseInsertError({
-            message: "Could not update status.",
+            const currentJobStatus = (currentStatus || { status: "none" })
+              .status;
+            const validStateTransitions =
+              VALID_JOB_STATUS_TRANSITIONS[currentJobStatus];
+            if (!validStateTransitions.includes(status)) {
+              throw new ValidationError({
+                message: `Invalid state transition. Valid transitions are: ${JSON.stringify(validStateTransitions)}.`,
+              });
+            }
+            await tx.job
+              .update({
+                where: {
+                  id,
+                },
+                data: {
+                  status,
+                  buildUrl,
+                },
+              })
+              .catch((e) => {
+                fastify.log.error(e);
+                throw new DatabaseInsertError({
+                  message: "Could not update status.",
+                });
+              });
+          })
+          .catch((e) => {
+            if (e instanceof BaseError) {
+              throw e;
+            }
+            throw new DatabaseInsertError({
+              message: "Could not update status.",
+            });
           });
-        });
         reply.status(201).send();
       } catch (e) {
         if (e instanceof BaseError) {

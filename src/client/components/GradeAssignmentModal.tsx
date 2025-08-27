@@ -40,7 +40,10 @@ export default function GradeAssignmentModal({
         <Button onClick={handleClose} variant="secondary">
           Close
         </Button>
-        <Button onClick={() => handleGrade(latestCommit?.sha || "")} variant="primary">
+        <Button
+          onClick={() => handleGrade(latestCommit?.sha || "")}
+          variant="primary"
+        >
           Yes, Grade Now
         </Button>
       </Modal.Footer>

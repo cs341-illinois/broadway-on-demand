@@ -182,7 +182,7 @@ function LabAttendanceContent({
       let message = "Failed to check in student.";
       try {
         message = (await response.json()).message;
-      } catch (e) { }
+      } catch (e) {}
       throw new Error(message);
     }
     return (await response.json()) as CheckInAcceptedResponse;
@@ -201,7 +201,7 @@ function LabAttendanceContent({
       let message = "Failed to submit attendance data.";
       try {
         message = (await response.json()).message;
-      } catch (e) { }
+      } catch (e) {}
       throw new Error(message);
     }
   };

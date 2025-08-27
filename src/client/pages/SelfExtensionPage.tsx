@@ -29,6 +29,7 @@ import {
   formulateUrl,
   getCourseInfo,
   getCourseRoles,
+  getSafeErrorResponse,
   getTimeZoneName,
   Resource,
   setCourseInfoSessionStorage,
@@ -38,9 +39,7 @@ import ConfirmationModal from "../components/ConfirmationModal";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { LoadingScreen } from "../components/Loading";
 
-import {
-  AssignmentQuotaLabels,
-} from "../../types/assignment";
+import { AssignmentQuotaLabels } from "../../types/assignment";
 import {
   SelfExtensionsGetResponse,
   selfExtensionsResponseSchema,
@@ -154,11 +153,8 @@ function SelfExtensionsContent({
       );
 
       if (!response.ok) {
-        const errorText = await response.text();
-        showAlert(
-          `Failed to create extension: ${errorText || "Please contact course staff."}`,
-          "warning",
-        );
+        const { message: errorText } = await getSafeErrorResponse(response);
+        showAlert(`Failed to create extension: ${errorText}`, "warning");
         // Do not close modal or clear processing here if user might retry or needs to see error
         return;
       }
@@ -334,8 +330,7 @@ function SelfExtensionsContent({
         <Row className="mt-3">
           <Col>
             <p className="text-muted small">
-              All timestamps shown in your local timezone (
-              {getTimeZoneName()}).
+              All timestamps shown in your local timezone ({getTimeZoneName()}).
             </p>
           </Col>
         </Row>

@@ -35,7 +35,7 @@ export async function getUserGrades({
         visibility: { not: AssignmentVisibility.INVISIBLE_FORCE_CLOSE },
         PublishedGrades: {
           some: {},
-        }
+        },
       },
     })
     .catch((e) => {

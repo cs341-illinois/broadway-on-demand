@@ -230,8 +230,8 @@ export default function StudentInfoPage() {
                 </h4>
               </h2>
               <p className="text-muted">
-                All timestamps shown in your local timezone (
-                {getTimeZoneName()}).
+                All timestamps shown in your local timezone ({getTimeZoneName()}
+                ).
               </p>
               <Row>
                 <Col xs={12} md={8}>
