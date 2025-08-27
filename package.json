@@ -14,7 +14,7 @@
     "dev": "tsx src/server.ts --dev",
     "start:prod": "node dist/server.js",
     "prisma:generate": "prisma generate && cp src/generated/prisma/enums.ts src/client/",
-    "prisma:studio": "prisma studio",
+    "prisma:studio": "prisma studio --port 9090",
     "prisma:migrate-dev": "prisma migrate dev && cp src/generated/prisma/enums.ts src/client/"
   },
   "dependencies": {

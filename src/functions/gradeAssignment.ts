@@ -5,6 +5,7 @@ import { z } from "zod";
 import moment from "moment-timezone";
 import { GradingError, ValidationError } from "../errors/index.js";
 import { type FastifyBaseLogger } from "fastify";
+import config from "../config.js";
 
 export type StartGradingRunInputs = {
   courseId: string;
@@ -28,6 +29,7 @@ export const agDateSchema = z
 
 export const jenkinsPayloadSchema = z.object({
   STUDENT_IDS: z.string().min(1),
+  BROADWAY_HOST: z.string().url().min(1),
   TERM_ID: z.string().min(1),
   COURSE_ID: z.string().min(1),
   DUE_DATE: z.union([agDateSchema, z.literal("now")]),
@@ -77,6 +79,7 @@ const getJenkinsParams = ({
 }: GetJenkinsParamsInputs): JenkinsPayload => {
   const proposedPayload = {
     STUDENT_IDS: netIds.join(","),
+    BROADWAY_HOST: config.HOST + config.BASE_URL,
     TERM_ID: courseId.split("-")[1],
     COURSE_ID: courseId.split("-")[0],
     DUE_DATE: agDateTime,
@@ -91,7 +94,6 @@ const getJenkinsParams = ({
     JOB_PRIORITY: getJobPriority(type),
     EXPECTED_COMMIT_HASH: expectedCommitHash
   };
-  console.log(proposedPayload)
   const { data, success, error } =
     jenkinsPayloadSchema.safeParse(proposedPayload);
   if (!success) {
