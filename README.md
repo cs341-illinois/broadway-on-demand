@@ -46,6 +46,8 @@ AZURE_TENANT_ID="your-azure-tenant-id"
 BASE_URL="/on-demand"
 HOST="http://localhost:3000"
 PORT=3000
+# This is the URL jenkins will use to contact On-Demand. By default, it's the public-facing URL.
+JENKINS_FACING_URL="http://host.docker.internal:4000/v2" 
 
 # Security
 COOKIE_SECRET="a-secure-random-string-at-least-32-characters"

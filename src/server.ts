@@ -241,7 +241,7 @@ async function start() {
 
 const server = await start();
 try {
-  await server.listen({ host: "localhost", port: config.PORT });
+  await server.listen({ host: "0.0.0.0", port: config.PORT });
 } catch (err) {
   server.log.error(err);
   process.exit(1);

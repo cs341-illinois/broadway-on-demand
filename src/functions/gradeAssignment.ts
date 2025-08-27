@@ -79,7 +79,7 @@ const getJenkinsParams = ({
 }: GetJenkinsParamsInputs): JenkinsPayload => {
   const proposedPayload = {
     STUDENT_IDS: netIds.join(","),
-    BROADWAY_HOST: config.HOST + config.BASE_URL,
+    BROADWAY_HOST: config.JENKINS_FACING_URL || config.HOST + config.BASE_URL,
     TERM_ID: courseId.split("-")[1],
     COURSE_ID: courseId.split("-")[0],
     DUE_DATE: agDateTime,

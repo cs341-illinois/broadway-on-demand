@@ -27,6 +27,7 @@ const configSchema = z.object({
   AZURE_TENANT_ID: z.string().min(1, "AZURE_TENANT_ID is required"),
   BASE_URL: z.optional(z.string()).default("/on-demand"),
   HOST: z.string().min(1),
+  JENKINS_FACING_URL: z.optional(z.string().url()),
   COOKIE_SECRET: z.string().min(32).default(makeid(32)),
   PORT: z.coerce.number().min(1024).default(3000),
   GRADER_TOKEN: z.string().min(32),

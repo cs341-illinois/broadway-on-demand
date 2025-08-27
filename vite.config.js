@@ -16,6 +16,7 @@ export default {
     viteFastifyReact({ spa: true }),
   ],
   server: {
+    allowedHosts: ["localhost", "127.0.0.1", "host.docker.internal"],
     hmr: {
       server: false,
       port: 5173,

@@ -22,7 +22,7 @@ services:
       retries: 5
     command: ["redis-server"]
 
-  dind:
+  docker:
     restart: unless-stopped
     image: docker:dind
     privileged: true
@@ -47,14 +47,14 @@ services:
       - "localhost:172.17.0.1"
     environment:
       - JENKINS_OPTS=--httpPort=8080
-      - DOCKER_HOST=tcp://dind:2376
+      - DOCKER_HOST=tcp://docker:2376
       - DOCKER_CERT_PATH=/certs/client
       - DOCKER_TLS_VERIFY=1
     volumes:
       - jenkins-docker-certs:/certs/client:ro
       - jenkins_data:/var/jenkins_home
     depends_on:
-      - dind
+      - docker
     healthcheck:
       test: curl --fail http://localhost:8080/jenkins/login || exit 1
       interval: 30s
