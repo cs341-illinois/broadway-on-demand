@@ -22,6 +22,49 @@ services:
       retries: 5
     command: ["redis-server"]
 
+  dind:
+    restart: unless-stopped
+    image: docker:dind
+    privileged: true
+    environment:
+      - DOCKER_TLS_CERTDIR=/certs
+    volumes:
+      - jenkins-docker-certs:/certs/client
+      - jenkins_data:/var/jenkins_home
+    ports:
+      - "2376:2376"
+    command:
+      - --storage-driver=overlay2
+
+  jenkins:
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: jenkins/Dockerfile
+    ports:
+      - "127.0.0.1:8080:8080"
+    extra_hosts:
+      - "localhost:172.17.0.1"
+    environment:
+      - JENKINS_OPTS=--httpPort=8080
+      - DOCKER_HOST=tcp://dind:2376
+      - DOCKER_CERT_PATH=/certs/client
+      - DOCKER_TLS_VERIFY=1
+    volumes:
+      - jenkins-docker-certs:/certs/client:ro
+      - jenkins_data:/var/jenkins_home
+    depends_on:
+      - dind
+    healthcheck:
+      test: curl --fail http://localhost:8080/jenkins/login || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+
+
 volumes:
   db_data:
   redis_data:
+  jenkins_data:
+  jenkins-docker-certs:
