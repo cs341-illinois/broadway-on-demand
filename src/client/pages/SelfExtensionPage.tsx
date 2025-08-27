@@ -14,7 +14,6 @@ import {
   Row,
   Table,
   Form,
-  // Spinner, // Replaced by LoadingScreen
 } from "react-bootstrap";
 import { useNavigate, useParams } from "react-router-dom";
 import moment from "moment-timezone";
@@ -33,24 +32,20 @@ import {
   getTimeZoneName,
   Resource,
   setCourseInfoSessionStorage,
-} from "../utils"; // Assuming createResource, Resource are in utils
+} from "../utils";
 import AppNavbar from "../components/Navbar";
 import ConfirmationModal from "../components/ConfirmationModal";
-import { ErrorBoundary } from "../components/ErrorBoundary"; // Standard component
-import { LoadingScreen } from "../components/Loading"; // Standard component
+import { ErrorBoundary } from "../components/ErrorBoundary";
+import { LoadingScreen } from "../components/Loading";
 
 import {
   AssignmentQuotaLabels,
-  // JobStatusLabels, // Not directly used in this page's display logic
 } from "../../types/assignment";
 import {
   SelfExtensionsGetResponse,
-  selfExtensionsResponseSchema, // Zod schema for parsing
+  selfExtensionsResponseSchema,
 } from "../../types/extension";
-// Role enum might be needed if getCourseRoles returns specific strings mapped in an enum
-// import { Role } from "../enums";
 
-// --- Data Fetching Function (modified for error handling and typing) ---
 async function getCurrentExtensionData(
   courseId: string,
 ): Promise<SelfExtensionsGetResponse> {
@@ -82,7 +77,6 @@ async function getCurrentExtensionData(
   return result.data;
 }
 
-// --- Content Component (handles form and presentation) ---
 interface SelfExtensionsContentProps {
   extensionPageResource: Resource<SelfExtensionsGetResponse>;
   courseId: string;
@@ -101,7 +95,6 @@ function SelfExtensionsContent({
   const [confirmModal, setConfirmModal] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  // Initialize useForm *inside* this component, so extensionData is available for the schema
   const formSchema = z.object({
     assignmentId: z
       .string()
@@ -118,12 +111,12 @@ function SelfExtensionsContent({
     register,
     handleSubmit,
     formState: { errors },
-    getValues, // To get assignmentId for modal message
-    reset, // To reset form after successful submission
+    getValues,
+    reset,
   } = useForm<FormData>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      assignmentId: extensionData.visibleAssignments[0]?.id || "", // Default to first available or empty
+      assignmentId: extensionData.visibleAssignments[0]?.id || "",
     },
   });
 
@@ -150,8 +143,6 @@ function SelfExtensionsContent({
         );
         setConfirmModal(false);
         setIsProcessing(false);
-        // Optionally trigger a refresh of data here too if this state is likely
-        // setResourceKey(k => k + 1);
         return;
       }
 
@@ -159,7 +150,7 @@ function SelfExtensionsContent({
         formulateUrl(
           `api/v1/extension/${courseId}/assignment/${assignmentId}/self`,
         ),
-        { method: "POST", credentials: "include" }, // Assuming 'include' is correct for your auth
+        { method: "POST", credentials: "include" },
       );
 
       if (!response.ok) {
@@ -169,12 +160,11 @@ function SelfExtensionsContent({
           "warning",
         );
         // Do not close modal or clear processing here if user might retry or needs to see error
-        // For this flow, we will let finally handle setIsProcessing(false)
-        return; // Stop execution for this attempt
+        return;
       }
       showAlert("Extension successfully applied!", "success");
       setConfirmModal(false);
-      setResourceKey((k) => k + 1); // Refresh data instead of window.location.reload()
+      setResourceKey((k) => k + 1);
     } catch (error: unknown) {
       const message =
         error instanceof Error ? error.message : "An unknown error occurred.";
@@ -309,11 +299,9 @@ function SelfExtensionsContent({
                         {...register("assignmentId")}
                         isInvalid={!!errors.assignmentId}
                       >
-                        {/* Optional: Add a default "Select..." option if desired */}
-                        {/* <option value="">-- Select an assignment --</option> */}
                         {extensionData.visibleAssignments.map((x) => (
                           <option key={x.id} value={x.id}>
-                            {x.name} (due{" "}
+                            {x.name} (currently due{" "}
                             {moment(x.dueAt).format(dateTimeFormatString)})
                           </option>
                         ))}
@@ -369,7 +357,6 @@ function SelfExtensionsContent({
                   <b>
                     {
                       extensionData.visibleAssignments.find(
-                        // find() is safer
                         (x) => x.id === getValues().assignmentId,
                       )!.name // ! is okay due to the find in the conditional render
                     }

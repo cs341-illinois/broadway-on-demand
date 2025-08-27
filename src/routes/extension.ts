@@ -120,7 +120,7 @@ const extensionRoutes: FastifyPluginAsync = async (fastify, _options) => {
                 new Date(x.dueAt) > new Date(),
             )
             .filter((x) => {
-              moment(x.dueAt).add({ hours: numExtensionHours }).toDate() <
+              return moment(x.dueAt).add({ hours: numExtensionHours }).toDate() <
                 courseCutoff;
             });
           return {
