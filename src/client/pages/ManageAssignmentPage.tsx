@@ -732,7 +732,7 @@ function ManageAssignmentContent({
           try {
             deleteExtension(courseId, assignmentId, deleteExtensionInfo.id);
             showAlert("Extension deleted successfully!", "success");
-            setResourceKey((curr) => curr + 1);
+            window.location.reload();
           } finally {
             setDeleteExtensionInfo(false);
           }
