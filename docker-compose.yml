@@ -38,9 +38,7 @@ services:
 
   jenkins:
     restart: unless-stopped
-    build:
-      context: .
-      dockerfile: jenkins/Dockerfile
+    image: ghcr.io/cs341-illinois/jenkins:latest
     ports:
       - "127.0.0.1:8080:8080"
     extra_hosts:

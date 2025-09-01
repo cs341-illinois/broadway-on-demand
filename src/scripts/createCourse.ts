@@ -133,7 +133,8 @@ interface RemainingCourseAnswers {
   githubRepoPrefix: string;
   githubToken: string;
   jenkinsBaseUrl: string;
-  jenkinsToken: string;
+  jenkinsUsername: string;
+  jenkinsApiKey: string;
   feedbackBranchName: string;
   courseCutoff: string;
   gradesRepo: string;
@@ -197,16 +198,17 @@ async function createCourseCLI(): Promise<void> {
     };
     const termName = capitalizeFirstLetterOnly(
       semesterCodeMapper[
-        parts.semesterCode.toLowerCase() as keyof typeof semesterCodeMapper
+      parts.semesterCode.toLowerCase() as keyof typeof semesterCodeMapper
       ] || parts.semesterCode,
     );
-    const defaultCourseName = `${parts.department.toUpperCase()} ${parts.courseNumber} ${termName} 20${parts.yearCode}`;
+    const defaultCourseName = `${parts.department.toUpperCase()} ${parts.courseNumber
+      } ${termName} 20${parts.yearCode}`;
     const courseIdNoTerm = `${parts.department}${parts.courseNumber}`;
     const termId = `${parts.semesterCode.toLowerCase()}${parts.yearCode}`;
 
     const tokenMessageSuffix = previousCourseId
       ? ` (leave empty to try using from ${previousCourseId})`
-      : " (input hidden)";
+      : "";
 
     const questionsForRemaining = [
       {
@@ -253,9 +255,14 @@ async function createCourseCLI(): Promise<void> {
         },
       },
       {
+        type: "input",
+        name: "jenkinsUsername",
+        message: `Jenkins Username${tokenMessageSuffix}:`,
+      },
+      {
         type: "password",
-        name: "jenkinsToken",
-        message: `Jenkins Token (base64(user:apiToken))${tokenMessageSuffix}:`,
+        name: "jenkinsApiKey",
+        message: `Jenkins API Key${tokenMessageSuffix}:`,
         mask: "*",
       },
       {
@@ -346,9 +353,17 @@ async function createCourseCLI(): Promise<void> {
       ],
     );
 
+    let jenkinsToken = "";
+    if (remainingAnswers.jenkinsUsername && remainingAnswers.jenkinsApiKey) {
+      jenkinsToken = Buffer.from(
+        `${remainingAnswers.jenkinsUsername}:${remainingAnswers.jenkinsApiKey}`,
+      ).toString("base64");
+    }
+
     const allAnswers = {
       ...preliminaryAnswers,
       ...remainingAnswers,
+      jenkinsToken,
     };
 
     let validatedData: CourseInput = CourseSchema.parse(allAnswers);
@@ -372,6 +387,7 @@ async function createCourseCLI(): Promise<void> {
     );
     console.log(JSON.stringify(displayData, null, 2));
     console.log("--------------------------------------------------");
+
     if (!validatedData.githubToken || !validatedData.jenkinsToken) {
       if (previousCourseId) {
         console.log(
@@ -383,6 +399,7 @@ async function createCourseCLI(): Promise<void> {
         );
       }
     }
+
     const prismaClient = new PrismaClient();
     if (!validatedData.githubToken && previousCourseId) {
       const { githubToken: oldGithubToken } =
@@ -400,6 +417,7 @@ async function createCourseCLI(): Promise<void> {
         });
       validatedData.jenkinsToken = oldJenkinsToken;
     }
+
     await prismaClient.$transaction(async (tx) => {
       await tx.course.create({ data: validatedData });
       await tx.users.create({
