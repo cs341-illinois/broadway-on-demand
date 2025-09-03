@@ -60,9 +60,10 @@ async function getAssignmentData(
     throw new Error("Course ID or Assignment ID is missing.");
   }
   const response = await fetch(
-    formulateUrl(`api/v1/courses/${courseId}/assignment/${assignmentId}`), {
-    signal: AbortSignal.timeout(5000)
-  }
+    formulateUrl(`api/v1/courses/${courseId}/assignment/${assignmentId}`),
+    {
+      signal: AbortSignal.timeout(5000),
+    },
   );
   if (!response.ok) {
     let errorMessage = `Failed to fetch assignment data. Status: ${response.status}`;
@@ -101,7 +102,7 @@ function AssignmentContent({
   isStaff,
   onGradeClick, // 👈 MODIFIED: Prop name changed
   navigate,
-  refreshingData
+  refreshingData,
 }: AssignmentContentProps) {
   const [assignmentData, setAssignmentData] =
     useState<AssignmentInformationResponse>(assignmentResource.read());
@@ -316,7 +317,7 @@ function AssignmentContent({
                                 .numRunsRemaining === "infinity"
                                 ? Infinity
                                 : assignmentData.gradingEligibility
-                                  .numRunsRemaining,
+                                    .numRunsRemaining,
                               true,
                             ).replace("Infinity", "∞")}
                           </b>{" "}
@@ -470,9 +471,12 @@ export default function AssignmentHomePage(): JSX.Element {
     if (!user) return;
     const url = new URL(window.location.href);
     if (url.searchParams.get("reloaded") === "true") {
-      showAlert("Your assignment information was changed. Please review the changes before grading.", "info");
+      showAlert(
+        "Your assignment information was changed. Please review the changes before grading.",
+        "info",
+      );
       url.searchParams.delete("reloaded");
-      history.replaceState(null, '', url.toString());
+      history.replaceState(null, "", url.toString());
     }
     if (!courseId || !assignmentId || courseRoles.length === 0) {
       showAlert(
@@ -498,7 +502,9 @@ export default function AssignmentHomePage(): JSX.Element {
     );
   }, [courseId, assignmentId, user?.id, resourceKey]);
 
-  const handleGradeClick = async (event: React.MouseEvent<HTMLButtonElement>) => {
+  const handleGradeClick = async (
+    event: React.MouseEvent<HTMLButtonElement>,
+  ) => {
     if (event.shiftKey) {
       setGradeModal(true);
       return;
@@ -512,14 +518,21 @@ export default function AssignmentHomePage(): JSX.Element {
         newData = await getAssignmentData(courseId, assignmentId);
         setRefreshingData(false);
       } catch (e) {
-        showAlert("Failed to refresh grading information. Your grading job may fail.", "danger");
+        showAlert(
+          "Failed to refresh grading information. Your grading job may fail.",
+          "danger",
+        );
       } finally {
         setRefreshingData(false);
       }
       const latestCommitDate = data.latestCommit?.date;
-      if (newData && (newData.latestCommit?.sha !== data.latestCommit?.sha || newData.studentRuns.length !== data.studentRuns.length)) {
+      if (
+        newData &&
+        (newData.latestCommit?.sha !== data.latestCommit?.sha ||
+          newData.studentRuns.length !== data.studentRuns.length)
+      ) {
         const url = new URL(window.location.href);
-        url.searchParams.set('reloaded', 'true');
+        url.searchParams.set("reloaded", "true");
         window.location.href = url.toString();
         return;
       }

@@ -198,11 +198,12 @@ async function createCourseCLI(): Promise<void> {
     };
     const termName = capitalizeFirstLetterOnly(
       semesterCodeMapper[
-      parts.semesterCode.toLowerCase() as keyof typeof semesterCodeMapper
+        parts.semesterCode.toLowerCase() as keyof typeof semesterCodeMapper
       ] || parts.semesterCode,
     );
-    const defaultCourseName = `${parts.department.toUpperCase()} ${parts.courseNumber
-      } ${termName} 20${parts.yearCode}`;
+    const defaultCourseName = `${parts.department.toUpperCase()} ${
+      parts.courseNumber
+    } ${termName} 20${parts.yearCode}`;
     const courseIdNoTerm = `${parts.department}${parts.courseNumber}`;
     const termId = `${parts.semesterCode.toLowerCase()}${parts.yearCode}`;
 

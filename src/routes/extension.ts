@@ -468,41 +468,43 @@ const extensionRoutes: FastifyPluginAsync = async (fastify, _options) => {
     },
     async (request, reply) => {
       const { courseId, assignmentId, extensionId } = request.params;
-      await fastify.prismaClient.$transaction(async (tx) => {
-        const { finalGradingRunId } = await tx.extensions
-          .delete({
-            where: {
-              courseId,
-              assignmentId,
-              id: extensionId,
-            },
-            select: {
-              finalGradingRunId: true
-            }
-          })
-          .catch((e) => {
-            fastify.log.error(e);
-            throw new DatabaseDeleteError({
-              message: "Failed to delete extension.",
-            });
-          });
-        if (finalGradingRunId) {
-          const jobRepository = new PrismaJobRepository(tx);
-          await jobRepository.deleteJob(finalGradingRunId).catch(e => {
-            throw new DatabaseDeleteError({
-              message: "Failed to remove final grading job from scheduler."
+      await fastify.prismaClient
+        .$transaction(async (tx) => {
+          const { finalGradingRunId } = await tx.extensions
+            .delete({
+              where: {
+                courseId,
+                assignmentId,
+                id: extensionId,
+              },
+              select: {
+                finalGradingRunId: true,
+              },
             })
+            .catch((e) => {
+              fastify.log.error(e);
+              throw new DatabaseDeleteError({
+                message: "Failed to delete extension.",
+              });
+            });
+          if (finalGradingRunId) {
+            const jobRepository = new PrismaJobRepository(tx);
+            await jobRepository.deleteJob(finalGradingRunId).catch((e) => {
+              throw new DatabaseDeleteError({
+                message: "Failed to remove final grading job from scheduler.",
+              });
+            });
+          }
+        })
+        .catch((e) => {
+          if (e instanceof BaseError) {
+            throw e;
+          }
+          fastify.log.error(e);
+          throw new DatabaseDeleteError({
+            message: "Failed to delete extension.",
           });
-        }
-      }).catch(e => {
-        if (e instanceof BaseError) {
-          throw e;
-        }
-        fastify.log.error(e);
-        throw new DatabaseDeleteError({
-          message: "Failed to delete extension.",
         });
-      })
 
       return reply.status(201).send();
     },

@@ -22,7 +22,11 @@ export default function AppNavbar({
   };
   return (
     <>
-      {import.meta.env.DEV && <div style={{ backgroundColor: "green", color: "white" }}><Container>DEVELOPMENT SERVER</Container></div>}
+      {import.meta.env.DEV && (
+        <div style={{ backgroundColor: "green", color: "white" }}>
+          <Container>DEVELOPMENT SERVER</Container>
+        </div>
+      )}
       <Navbar expand="lg" className="bg-dark" variant="dark">
         <Container>
           <Navbar.Brand href={formulateUrl("dashboard")} className="text-white">

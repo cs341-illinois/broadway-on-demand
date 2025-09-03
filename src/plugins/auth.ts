@@ -31,7 +31,10 @@ const authPlugin: FastifyPluginAsync = async (fastify, _options) => {
         // fire-and-forget
         (async () => {
           try {
-            const netId = request.session.user!.email.replace("@illinois.edu", "");
+            const netId = request.session.user!.email.replace(
+              "@illinois.edu",
+              "",
+            );
             const newRoles = await getUserRolesByNetId(netId);
             request.session.user!.roles = newRoles;
             await request.session.save();
@@ -42,9 +45,7 @@ const authPlugin: FastifyPluginAsync = async (fastify, _options) => {
           }
         })();
       }
-      const courseRoles = new Set(
-        getCourseRoles(courseId, roles),
-      );
+      const courseRoles = new Set(getCourseRoles(courseId, roles));
       if (intersection(courseRoles, new Set(validRoles)).size === 0) {
         throw new UnauthorizedError({
           message: "You do not have permission to perform this action.",
