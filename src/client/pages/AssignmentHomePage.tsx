@@ -4,9 +4,10 @@ import {
   Card,
   Col,
   Container,
-  Modal, // 👈 ADDED: Import Modal
+  Modal,
   OverlayTrigger,
   Row,
+  Spinner,
   Table,
   Tooltip,
 } from "react-bootstrap";
@@ -59,7 +60,9 @@ async function getAssignmentData(
     throw new Error("Course ID or Assignment ID is missing.");
   }
   const response = await fetch(
-    formulateUrl(`api/v1/courses/${courseId}/assignment/${assignmentId}`),
+    formulateUrl(`api/v1/courses/${courseId}/assignment/${assignmentId}`), {
+    signal: AbortSignal.timeout(5000)
+  }
   );
   if (!response.ok) {
     let errorMessage = `Failed to fetch assignment data. Status: ${response.status}`;
@@ -86,9 +89,9 @@ interface AssignmentContentProps {
   courseId: string;
   assignmentId: string;
   isStaff: boolean;
-  // 👇 MODIFIED: Prop name and type changed to handle click events
   onGradeClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
   navigate: ReturnType<typeof useNavigate>;
+  refreshingData: boolean;
 }
 
 function AssignmentContent({
@@ -98,6 +101,7 @@ function AssignmentContent({
   isStaff,
   onGradeClick, // 👈 MODIFIED: Prop name changed
   navigate,
+  refreshingData
 }: AssignmentContentProps) {
   const [assignmentData, setAssignmentData] =
     useState<AssignmentInformationResponse>(assignmentResource.read());
@@ -123,7 +127,7 @@ function AssignmentContent({
     const currentData = assignmentResource.read();
     setAssignmentData(currentData);
     document.title = `${currentData.assignmentName} | ${currentData.courseName}`;
-  }, [assignmentResource]); // currentData will be stable if assignmentResource instance is stable. Read directly.
+  }, [assignmentResource]);
 
   useMemo(() => {
     if (readyState === ReadyState.OPEN && assignmentData?.studentRuns) {
@@ -312,7 +316,7 @@ function AssignmentContent({
                                 .numRunsRemaining === "infinity"
                                 ? Infinity
                                 : assignmentData.gradingEligibility
-                                    .numRunsRemaining,
+                                  .numRunsRemaining,
                               true,
                             ).replace("Infinity", "∞")}
                           </b>{" "}
@@ -321,11 +325,26 @@ function AssignmentContent({
                       </span>
                     </OverlayTrigger>
                     <Button
-                      onClick={onGradeClick} // 👈 MODIFIED: Using the new event handler
-                      className="w-100"
-                      disabled={!assignmentData.latestCommit}
+                      onClick={onGradeClick}
+                      className="w-100 d-flex align-items-center justify-content-center"
+                      variant="primary"
+                      disabled={!assignmentData.latestCommit || refreshingData}
                     >
-                      Grade Assignment
+                      {refreshingData ? (
+                        <>
+                          <Spinner
+                            as="span"
+                            animation="border"
+                            size="sm"
+                            role="status"
+                            aria-hidden="true"
+                            className="me-2"
+                          />
+                          Validating Request...
+                        </>
+                      ) : (
+                        "Grade Assignment"
+                      )}
                     </Button>
                   </>
                 )}
@@ -434,8 +453,8 @@ export default function AssignmentHomePage(): JSX.Element {
   const { showAlert } = useAlert();
 
   const [gradeModal, setGradeModal] = useState<boolean>(false);
+  const [refreshingData, setRefreshingData] = useState<boolean>(false);
   const [resourceKey, setResourceKey] = useState<number>(0);
-  // 👇 ADDED: State for the new confirmation modal
   const [showConfirmModal, setShowConfirmModal] = useState<boolean>(false);
 
   const courseRoles = useMemo(() => {
@@ -449,7 +468,12 @@ export default function AssignmentHomePage(): JSX.Element {
 
   useEffect(() => {
     if (!user) return;
-
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("reloaded") === "true") {
+      showAlert("Your assignment information was changed. Please review the changes before grading.", "info");
+      url.searchParams.delete("reloaded");
+      history.replaceState(null, '', url.toString());
+    }
     if (!courseId || !assignmentId || courseRoles.length === 0) {
       showAlert(
         "The specified assignment does not exist or you do not have access.",
@@ -474,7 +498,7 @@ export default function AssignmentHomePage(): JSX.Element {
     );
   }, [courseId, assignmentId, user?.id, resourceKey]);
 
-  const handleGradeClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+  const handleGradeClick = async (event: React.MouseEvent<HTMLButtonElement>) => {
     if (event.shiftKey) {
       setGradeModal(true);
       return;
@@ -482,8 +506,23 @@ export default function AssignmentHomePage(): JSX.Element {
 
     try {
       const data = assignmentResource.read();
+      let newData;
+      try {
+        setRefreshingData(true);
+        newData = await getAssignmentData(courseId, assignmentId);
+        setRefreshingData(false);
+      } catch (e) {
+        showAlert("Failed to refresh grading information. Your grading job may fail.", "danger");
+      } finally {
+        setRefreshingData(false);
+      }
       const latestCommitDate = data.latestCommit?.date;
-
+      if (newData && (newData.latestCommit?.sha !== data.latestCommit?.sha || newData.studentRuns.length !== data.studentRuns.length)) {
+        const url = new URL(window.location.href);
+        url.searchParams.set('reloaded', 'true');
+        window.location.href = url.toString();
+        return;
+      }
       if (data.studentRuns.length === 0 || !latestCommitDate) {
         setGradeModal(true);
         return;
@@ -609,8 +648,9 @@ export default function AssignmentHomePage(): JSX.Element {
             courseId={courseId}
             assignmentId={assignmentId}
             isStaff={isStaff}
-            onGradeClick={handleGradeClick} // 👈 MODIFIED: Pass the new handler
+            onGradeClick={handleGradeClick}
             navigate={navigate}
+            refreshingData={refreshingData}
           />
         </Suspense>
       </ErrorBoundary>
@@ -626,7 +666,7 @@ export default function AssignmentHomePage(): JSX.Element {
         handleClose={() => setShowConfirmModal(false)}
         handleConfirm={() => {
           setShowConfirmModal(false);
-          setGradeModal(true); // Open the main grade modal on confirm
+          setGradeModal(true);
         }}
       />
     </div>

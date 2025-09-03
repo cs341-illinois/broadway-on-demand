@@ -9,18 +9,18 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - db_data:/var/lib/postgresql/
+      - pg_data:/var/lib/postgresql/data/
   redis:
     restart: unless-stopped
     image: redis:8
     ports:
       - "6379:6379"
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
+      test: [ "CMD-SHELL", "redis-cli ping | grep PONG" ]
       interval: 1s
       timeout: 3s
       retries: 5
-    command: ["redis-server"]
+    command: [ "redis-server" ]
 
   docker:
     restart: unless-stopped
@@ -61,7 +61,6 @@ services:
       start_period: 90s
 
 volumes:
-  db_data:
-  redis_data:
+  pg_data:
   jenkins_data:
   jenkins-docker-certs:
