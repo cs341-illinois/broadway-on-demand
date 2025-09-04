@@ -69,7 +69,7 @@ export const startScheduledJob = async ({
       });
       netIds = courseStudents.map((x) => x.netId);
     }
-    await startGradingRun({
+    const queueUrl = await startGradingRun({
       courseId: job.courseId,
       jenkinsPipelineName: jenkinsPipelineName || job.assignmentId,
       netIds,
@@ -81,6 +81,14 @@ export const startScheduledJob = async ({
       jenkinsToken,
       logger,
     });
+    if (queueUrl) {
+      await prismaClient.job.update({
+        where: { id: job.id },
+        data: { queueUrl }
+      })
+    } else {
+      logger.error(`Could not find queue URL for job ${job.id}!`)
+    }
     logger.info(`Triggered job ID ${job.id} with Jenkins.`);
   } finally {
     logger.debug("Releasing job lock.");

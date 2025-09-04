@@ -148,4 +148,5 @@ export async function startGradingRun({
       message: `Jenkins replied with status code ${result.status}`,
     });
   }
+  return result.headers.get("location");
 }

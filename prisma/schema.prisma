@@ -151,6 +151,7 @@ model Job {
   type                 JobType
   autogradableCategory AutogradableCategory? // a workaround just to get the enum to be generated
   buildUrl             String?
+  queueUrl             String?
 
   dueAt              DateTime
   isScheduledJob     Boolean         @default(false)

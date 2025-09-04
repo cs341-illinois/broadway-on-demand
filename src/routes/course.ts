@@ -723,7 +723,7 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
                 id: true,
               },
             });
-            await startGradingRun({
+            const queueUrl = await startGradingRun({
               courseId,
               jenkinsPipelineName,
               netIds: [netId],
@@ -736,6 +736,15 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
               expectedCommitHash,
               logger: fastify.log,
             });
+            if (queueUrl) {
+              await tx.job.update({
+                where: { id: result.id },
+                data: { queueUrl }
+              })
+            } else {
+              request.log.error(`Could not find queue URL for job ${result.id}!`)
+            }
+
             return result;
           })
           .catch((e) => {
@@ -797,7 +806,7 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
                   id: true,
                 },
               });
-              await startGradingRun({
+              const queueUrl = await startGradingRun({
                 courseId,
                 jenkinsPipelineName,
                 netIds: [netId],
@@ -810,6 +819,14 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
                 expectedCommitHash,
                 logger: fastify.log,
               });
+              if (queueUrl) {
+                await tx.job.update({
+                  where: { id: result.id },
+                  data: { queueUrl }
+                })
+              } else {
+                request.log.error(`Could not find queue URL for job ${result.id}!`)
+              }
               return result;
             },
             { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
