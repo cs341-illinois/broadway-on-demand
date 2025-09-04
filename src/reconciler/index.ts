@@ -31,6 +31,7 @@ export class JobReconciler extends EventEmitter {
   private logger: pino.Logger | FastifyBaseLogger;
   private prismaClient: PrismaClient;
   private pollingInterval?: NodeJS.Timeout;
+  private gracePeriodMs: number;
 
 
 
@@ -38,13 +39,14 @@ export class JobReconciler extends EventEmitter {
     prismaClient: PrismaClient,
     options: {
       pollingIntervalMs?: number; // Polling interval in milliseconds
-      gracePeriodMs?: number; // Grace period for pending job execution in milliseconds
+      gracePeriodMs?: number; // Skip jobs created in the past gracePeriodMs when checking for lost jobs.
       logger?: pino.Logger | FastifyBaseLogger;
     } = {},
   ) {
     super();
     this.prismaClient = prismaClient;
     this.pollingIntervalMs = options.pollingIntervalMs || 20 * 1000; // Default: 20 seconds
+    this.gracePeriodMs = options.gracePeriodMs || 5 * 1000; // Default: 5 seconds
     this.logger = (options.logger || pino.pino({})).child({
       module: "reconciler",
     });
@@ -132,10 +134,14 @@ export class JobReconciler extends EventEmitter {
   }
   private async getUnreportedJobs(): Promise<UnreportedJob[] | null> {
     this.logger.debug("Getting unreported jobs");
+    const earliestJobWithGracePeriod = new Date(Date.now() - this.gracePeriodMs);
     const pendingJobs = await this.prismaClient.job.findMany({
       where: {
         status: JobStatus.PENDING,
-        queueUrl: { not: null }
+        queueUrl: { not: null },
+        createdAt: {
+          lte: earliestJobWithGracePeriod,
+        },
       },
       select: {
         id: true,
