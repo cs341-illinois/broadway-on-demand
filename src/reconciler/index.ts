@@ -26,6 +26,7 @@ export type JenkinsBuildItem = {
 
 export class JobReconciler extends EventEmitter {
   private isRunning: boolean = false;
+  private isReconciling: boolean = false;
   private pollingIntervalMs: number;
   private logger: pino.Logger | FastifyBaseLogger;
   private prismaClient: PrismaClient;
@@ -79,43 +80,54 @@ export class JobReconciler extends EventEmitter {
   }
 
   public async reconcileJobs() {
-    const unreportedJobs = await this.getUnreportedJobs();
-    if (!unreportedJobs || unreportedJobs.length === 0) {
-      this.logger.debug("No unreported jobs to reconcile.");
+    if (this.isReconciling) {
+      this.logger.debug("Reconciliation is already in progress. Skipping this cycle.");
       return;
     }
-    const statusCheckPromises = unreportedJobs.map(async (job) => {
-      const newStatus = await this.getQueuedJobStatus(job);
-      return { jobId: job.id, newStatus };
-    });
-
-    const results = await Promise.allSettled(statusCheckPromises);
-    const jobsToUpdate = results
-      .filter((res): res is PromiseFulfilledResult<{ jobId: string; newStatus: JobStatus }> =>
-        res.status === 'fulfilled' &&
-        res.value.newStatus !== null &&
-        res.value.newStatus !== JobStatus.PENDING
-      )
-      .map(res => res.value);
-
-    if (jobsToUpdate.length === 0) {
-      this.logger.debug("Reconciliation complete. No jobs required a status update.");
-      return;
-    }
-
-    this.logger.debug(`Found ${jobsToUpdate.length} job(s) to update.`);
-    const updateOperations = jobsToUpdate.map(job => {
-      return this.prismaClient.job.update({
-        where: { id: job.jobId, status: JobStatus.PENDING }, // if the job moved past PENDING while we do this, then do nothing
-        data: { status: job.newStatus },
-      });
-    });
-
+    this.isReconciling = true;
     try {
-      const transactionResult = await this.prismaClient.$transaction(updateOperations);
-      this.logger.debug(`Successfully updated ${transactionResult.length} job(s) in the database.`);
+      const unreportedJobs = await this.getUnreportedJobs();
+      if (!unreportedJobs || unreportedJobs.length === 0) {
+        this.logger.debug("No unreported jobs to reconcile.");
+        return;
+      }
+      const statusCheckPromises = unreportedJobs.map(async (job) => {
+        const newStatus = await this.getQueuedJobStatus(job);
+        return { jobId: job.id, newStatus };
+      });
+
+      const results = await Promise.allSettled(statusCheckPromises);
+      const jobsToUpdate = results
+        .filter((res): res is PromiseFulfilledResult<{ jobId: string; newStatus: JobStatus }> =>
+          res.status === 'fulfilled' &&
+          res.value.newStatus !== null &&
+          res.value.newStatus !== JobStatus.PENDING
+        )
+        .map(res => res.value);
+
+      if (jobsToUpdate.length === 0) {
+        this.logger.debug("Reconciliation complete. No jobs required a status update.");
+        return;
+      }
+
+      this.logger.debug(`Found ${jobsToUpdate.length} job(s) to update.`);
+      const updateOperations = jobsToUpdate.map(job => {
+        return this.prismaClient.job.update({
+          where: { id: job.jobId, status: JobStatus.PENDING }, // if the job moved past PENDING while we do this, then do nothing
+          data: { status: job.newStatus },
+        });
+      });
+
+      try {
+        const transactionResult = await this.prismaClient.$transaction(updateOperations);
+        this.logger.debug(`Successfully updated ${transactionResult.length} job(s) in the database.`);
+      } catch (error) {
+        this.logger.error({ error }, "An error occurred during the job update transaction.");
+      }
     } catch (error) {
-      this.logger.error({ error }, "An error occurred during the job update transaction.");
+      this.logger.error({ error }, "An unexpected error occurred during job reconciliation.");
+    } finally {
+      this.isReconciling = false;
     }
   }
   private async getUnreportedJobs(): Promise<UnreportedJob[] | null> {
