@@ -667,12 +667,6 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
           assignmentId: z.string().min(1),
         }),
         body: z.object({
-          dueDate: z
-            .string()
-            .datetime()
-            .refine((val) => new Date(val) <= new Date(), {
-              message: "Due date must not be in the future.",
-            }),
           expectedCommitHash: z.string().min(1),
         }),
         response: {
@@ -683,8 +677,7 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
     async (request, reply) => {
       const netId = request.session.user.email.replace("@illinois.edu", "");
       const { courseId, assignmentId } = request.params;
-      const { dueDate: userDueDate, expectedCommitHash } = request.body;
-      const dueAtTimestamp = new Date(userDueDate).toISOString();
+      const { expectedCommitHash } = request.body;
       const courseRoles = getCourseRoles(courseId, request.session.user.roles);
       const { jenkinsBaseUrl, jenkinsToken, courseTimezone } =
         await fastify.prismaClient.course.findFirstOrThrow({
@@ -716,7 +709,7 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
                 assignmentId,
                 netId: [netId],
                 type: JobType.STUDENT_INITIATED,
-                dueAt: dueAtTimestamp,
+                dueAt: new Date().toISOString(),
                 scheduledAt: new Date().toISOString(),
               },
               select: {
@@ -727,7 +720,7 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
               courseId,
               jenkinsPipelineName,
               netIds: [netId],
-              isoTimestamp: dueAtTimestamp,
+              isoTimestamp: "now",
               jenkinsBaseUrl,
               courseTimezone,
               jenkinsToken,
@@ -799,7 +792,7 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
                   assignmentId,
                   netId: [netId],
                   type: JobType.STUDENT_INITIATED,
-                  dueAt: dueAtTimestamp,
+                  dueAt: new Date().toISOString(),
                   scheduledAt: new Date().toISOString(),
                 },
                 select: {
@@ -810,7 +803,7 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
                 courseId,
                 jenkinsPipelineName,
                 netIds: [netId],
-                isoTimestamp: dueAtTimestamp,
+                isoTimestamp: "now",
                 jenkinsBaseUrl,
                 courseTimezone,
                 jenkinsToken,

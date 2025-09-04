@@ -120,7 +120,7 @@ export async function startGradingRun({
 }: StartGradingRunInputs) {
   gradingRunId = gradingRunId || uuid4();
   const jenkinsJobUrl = `${jenkinsBaseUrl}/job/${jenkinsPipelineName}/buildWithParameters`;
-  const agDateTime = moment(isoTimestamp)
+  const agDateTime = isoTimestamp === "now" ? "now" : moment(isoTimestamp)
     .tz(courseTimezone)
     .format("YYYY-MM-DD HH:mm:ss");
   const params = getJenkinsParams({
