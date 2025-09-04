@@ -30,7 +30,6 @@ export class JobReconciler extends EventEmitter {
   private logger: pino.Logger | FastifyBaseLogger;
   private prismaClient: PrismaClient;
   private pollingInterval?: NodeJS.Timeout;
-  private gracePeriodMs: number;
 
 
 
@@ -45,7 +44,6 @@ export class JobReconciler extends EventEmitter {
     super();
     this.prismaClient = prismaClient;
     this.pollingIntervalMs = options.pollingIntervalMs || 20 * 1000; // Default: 20 seconds
-    this.gracePeriodMs = options.gracePeriodMs || 15 * 60 * 1000; // Default: 15 min. After this time, EXECUTED jobs are abandoned in PENDING state. Non-executed jobs are monitored until they queue.
     this.logger = (options.logger || pino.pino({})).child({
       module: "reconciler",
     });
@@ -64,6 +62,22 @@ export class JobReconciler extends EventEmitter {
       `Job reconciler started. Polling every ${this.pollingIntervalMs / 1000}s.`,
     );
   }
+
+  public async stop(): Promise<void> {
+    if (!this.isRunning) return;
+    this.logger.info("Stopping job reconciler...");
+
+    if (this.pollingInterval) {
+      clearInterval(this.pollingInterval);
+      this.pollingInterval = undefined;
+    }
+
+    this.isRunning = false;
+    this.logger.info(
+      `Job reconciler stopped.`,
+    );
+  }
+
   public async reconcileJobs() {
     const unreportedJobs = await this.getUnreportedJobs();
     if (!unreportedJobs || unreportedJobs.length === 0) {
