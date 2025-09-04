@@ -170,6 +170,7 @@ model Job {
   usersCourseId      String?
 
   @@index([status, scheduledAt])
+  @@index([status, createdAt])
   @@index([name, status])
   @@index([netId, courseId, assignmentId, type]) // get user runs call
 }
