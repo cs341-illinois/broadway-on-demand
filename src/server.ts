@@ -14,6 +14,7 @@ import config from "./config.js";
 import { getUserRolesByNetId } from "./functions/userData.js";
 import { JobScheduler } from "./scheduler/scheduler.js";
 import { PrismaJobRepository } from "./scheduler/prismaRepository.js";
+import { JobReconciler } from "./reconciler/index.js";
 import fastifyAuthPlugin from "./plugins/auth.js";
 import FastifyStatic from "@fastify/static";
 import courseRoutes from "./routes/course.js";
@@ -42,6 +43,17 @@ async function start() {
     genReqId: () => randomUUID().toString(),
     trustProxy: true,
   });
+
+  process.on('uncaughtException', err => {
+    server.log.fatal({ msg: 'Uncaught exception', err });
+    throw err;
+  });
+
+  process.on('unhandledRejection', reason => {
+    const err = new Error(`Unhanded rejection. Reason: ${reason}`);
+    server.log.error({ msg: 'Unhandled rejection', err });
+  });
+
   server.jobSockets = new Map<string, Set<WebSocket>>();
   server.prismaClient = new PrismaClient({
     transactionOptions: {
@@ -78,8 +90,11 @@ async function start() {
     const { redisClient, prismaClient } = server;
     return await startScheduledJob({ job, logger, redisClient, prismaClient });
   });
-
   server.scheduler.start();
+  server.reconciler = new JobReconciler(server.prismaClient, {
+    logger: server.log
+  })
+  server.reconciler.start();
   await server.register(errorHandlerPlugin);
   await server.register(fastifyAuthPlugin);
   if (process.argv.includes("--dev")) {

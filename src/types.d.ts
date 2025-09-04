@@ -7,6 +7,7 @@ import { type FastifyOAuth2Namespace } from "@fastify/oauth2";
 import { type JobScheduler } from "./scheduler/scheduler.ts";
 import { type PrismaClient, type Role } from "./generated/prisma/client.ts";
 import { type RedisClientType } from "redis";
+import { type JobReconciler } from "./reconciler/index.ts";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -14,6 +15,7 @@ declare module "fastify" {
     prismaClient: PrismaClient;
     redisClient: RedisClientType;
     scheduler: JobScheduler;
+    reconciler: JobReconciler;
     jobSockets: Map<string, Set<WebSocket>>;
     authorize: (
       request: FastifyRequest,
