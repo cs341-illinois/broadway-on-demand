@@ -153,7 +153,7 @@ model Job {
   buildUrl             String?
 
   dueAt              DateTime
-  isScheduledJob     Boolean         @default(false)
+  isScheduledJob     Boolean
   scheduledAt        DateTime?
   startedAt          DateTime?
   status             JobStatus       @default(PENDING)
