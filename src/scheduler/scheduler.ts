@@ -285,10 +285,10 @@ export class JobScheduler extends EventEmitter {
 
       if (!handler) {
         childLogger.error(
-          `No handler found for job type "${job.type}". Marking as FAILED.`,
+          `No handler found for job type "${job.type}". Marking as INFRA_ERROR.`,
         );
         await this.repository.updateJob(jobId, {
-          status: JobStatus.FAILED,
+          status: JobStatus.INFRA_ERROR,
           failedAt: new Date(),
         });
         this.emit("jobFailed", {

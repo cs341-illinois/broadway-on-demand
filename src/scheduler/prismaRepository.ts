@@ -41,6 +41,7 @@ export class PrismaJobRepository implements JobRepository {
           lte: moment().add({ minutes: this.lookaheadMinutes }).toDate(),
         },
         startedAt: null,
+        isScheduledJob: true
       },
       orderBy: {
         scheduledAt: "asc",
@@ -50,26 +51,26 @@ export class PrismaJobRepository implements JobRepository {
 
   async findJobById(id: string): Promise<Job | null> {
     return this.client.job.findUnique({
-      where: { id },
+      where: { id, isScheduledJob: true },
     });
   }
 
   async createJob(job: Partial<Job>): Promise<Job> {
     return this.client.job.create({
-      data: job as Prisma.JobCreateInput,
+      data: { ...job, isScheduledJob: true } as Prisma.JobCreateInput,
     });
   }
 
   async updateJob(id: string, data: Partial<Job>): Promise<Job> {
     return this.client.job.update({
-      where: { id },
+      where: { id, isScheduledJob: true },
       data: data as Prisma.JobUpdateInput,
     });
   }
 
   async deleteJob(id: string): Promise<void> {
     await this.client.job.delete({
-      where: { id },
+      where: { id, isScheduledJob: true },
     });
   }
 
@@ -81,6 +82,7 @@ export class PrismaJobRepository implements JobRepository {
     return this.client.job.findMany({
       where: {
         status: JobStatus.RUNNING,
+        isScheduledJob: true
       },
     });
   }
@@ -90,7 +92,7 @@ export class PrismaJobRepository implements JobRepository {
    */
   async findJobsByStatus(status: JobStatus): Promise<Job[]> {
     return this.client.job.findMany({
-      where: { status },
+      where: { status, isScheduledJob: true },
     });
   }
 
@@ -99,7 +101,7 @@ export class PrismaJobRepository implements JobRepository {
    */
   async findJobsByName(name: string): Promise<Job[]> {
     return this.client.job.findMany({
-      where: { name },
+      where: { name, isScheduledJob: true },
     });
   }
 
@@ -108,6 +110,7 @@ export class PrismaJobRepository implements JobRepository {
    */
   async getJobStats(): Promise<Record<JobStatus, number>> {
     const stats = await this.client.job.groupBy({
+      where: { isScheduledJob: true },
       by: ["status"],
       _count: {
         status: true,
