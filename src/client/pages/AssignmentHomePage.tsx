@@ -47,9 +47,15 @@ const getFeedbackFileName = (
   jobId: string,
   courseTimezone: string,
 ): string => {
+  // this is a hack around the warden bug which we fixed at this time
+  // TODO: get rid of this in SP 26 once that data no longer exists.
   const timezoneDate = moment(date).tz(courseTimezone);
-  const formatted = timezoneDate.format("MM_DD_YY_HH_mm_ss");
-  return `feedback_${formatted}_${jobId}.md`;
+  if (timezoneDate < moment.tz("2025-09-04 22:22", "America/Chicago")) {
+    const formatted = timezoneDate.format("MM_DD_YY_HH_mm_ss");
+    return `feedback_${formatted}_${jobId}.md`;
+  } else {
+    return `feedback_${jobId}.md`;
+  }
 };
 
 async function getAssignmentData(
@@ -317,7 +323,7 @@ function AssignmentContent({
                                 .numRunsRemaining === "infinity"
                                 ? Infinity
                                 : assignmentData.gradingEligibility
-                                    .numRunsRemaining,
+                                  .numRunsRemaining,
                               true,
                             ).replace("Infinity", "∞")}
                           </b>{" "}
