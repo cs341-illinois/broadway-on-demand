@@ -132,13 +132,12 @@ const graderCallbackRoutes: FastifyPluginAsync = async (fastify, _options) => {
                 },
               })
               .catch((e) => {
+                request.log.error(e);
                 throw new DatabaseFetchError({
                   message: "Could not find course configuration.",
                 });
               });
             const assignmentId = jobData["assignmentId"];
-            const users = jobData["netId"];
-            let usersLength: number = users.length;
             const results = await tx.stagingGrades.findMany({
               where: {
                 jobId: id,
@@ -150,23 +149,9 @@ const graderCallbackRoutes: FastifyPluginAsync = async (fastify, _options) => {
                 comments: true,
               },
             });
-            if (users.length === 1 && users[0] === "_ALL_") {
-              usersLength = await tx.users.count({
-                where: {
-                  courseId: results[0].courseId,
-                  role: Role.STUDENT,
-                  enabled: true,
-                },
-              });
-            }
             if (!results) {
               throw new ValidationError({
                 message: "Could not find staging grades for job.",
-              });
-            }
-            if (usersLength !== results.length) {
-              throw new ValidationError({
-                message: `Found ${results.length} grades to publish but expected ${usersLength} results!`,
               });
             }
             const promises = results.map((x) =>
