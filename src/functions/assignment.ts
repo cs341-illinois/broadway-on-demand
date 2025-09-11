@@ -21,6 +21,7 @@ import { getAssignmentQuotaAppliedRuns } from "./runs.js";
 import { getActiveExtensions } from "./extensions.js";
 import { type JobScheduler } from "../scheduler/scheduler.js";
 import { FastifyBaseLogger } from "fastify";
+import moment, { Moment } from "moment-timezone";
 
 type CreateAssignmentInput = {
   client: PrismaClient;
@@ -291,7 +292,7 @@ export async function getAssignmentDueDate({
   tx: Prisma.TransactionClient;
   courseId: string;
   assignmentId: string;
-}): Promise<Date | null> {
+}): Promise<Moment | null> {
   const { finalGradingRunId } = await tx.assignment
     .findFirstOrThrow({
       where: {
@@ -320,7 +321,7 @@ export async function getAssignmentDueDate({
     })
     .catch((_e) => null);
   if (result) {
-    return result.dueAt;
+    return moment(result.dueAt);
   }
   return null;
 }
@@ -344,8 +345,6 @@ export async function getGradingEligibility({
   netId,
   courseTimezone,
 }: GetGradingEligibilityInput): Promise<GetGradingEligibilityOutput> {
-  let gradingEligibility: GetGradingEligibilityOutput;
-
   // Determine eligibility based on original assignment
   courseTimezone =
     courseTimezone ||
@@ -355,7 +354,7 @@ export async function getGradingEligibility({
         select: { courseTimezone: true },
       })
     ).courseTimezone;
-  const { quotaPeriod, quotaAmount, visibility, openAt } =
+  const { quotaPeriod, quotaAmount, visibility, openAt: openAtDate } =
     await tx.assignment.findFirstOrThrow({
       where: {
         courseId,
@@ -368,82 +367,87 @@ export async function getGradingEligibility({
         openAt: true,
       },
     });
-
+  const openAt = moment(openAtDate);
   if (
-    visibility == AssignmentVisibility.FORCE_CLOSE ||
-    visibility == AssignmentVisibility.INVISIBLE_FORCE_CLOSE
+    visibility === AssignmentVisibility.FORCE_CLOSE ||
+    visibility === AssignmentVisibility.INVISIBLE_FORCE_CLOSE
   ) {
-    gradingEligibility = { eligible: false };
-  } else {
-    const assignmentDueDatePromise = getAssignmentDueDate({
-      tx,
-      courseId,
-      assignmentId,
-    });
-    const extensionsPromise = getActiveExtensions({
-      tx,
-      courseId,
-      assignmentId,
-      netId,
-    });
-    const assignmentPeriodRuns = await getAssignmentQuotaAppliedRuns({
-      tx,
-      courseId,
-      assignmentId,
-      netId,
-      quotaPeriod,
-      quotaAmount,
-      courseTimezone,
-    });
-    const extensions = await extensionsPromise;
-    const assignmentDueDate = await assignmentDueDatePromise;
-
-    if (!assignmentDueDate) {
-      throw new DatabaseFetchError({
-        message: "Could not find due date for assignment.",
-      });
-    }
-
-    const assignmentIsOpen =
-      (visibility == AssignmentVisibility.FORCE_OPEN ||
-        (assignmentDueDate > new Date() && openAt < new Date())) &&
-      quotaAmount - assignmentPeriodRuns.length > 0;
-
-    if (extensions.length === 0) {
-      const numRunsRemaining = Math.max(
-        0,
-        quotaAmount - assignmentPeriodRuns.length,
-      );
-      if (assignmentIsOpen && numRunsRemaining > 0) {
-        gradingEligibility = {
-          eligible: true,
-          source: { type: "ASSIGNMENT" },
-          numRunsRemaining,
-          runsRemainingPeriod: quotaPeriod as any,
-        };
-      } else {
-        gradingEligibility = { eligible: false };
-      }
-    } else {
-      const numRunsRemaining = Math.max(
-        0,
-        extensions[0].quotaAmount - extensions[0].ExtensionUsageHistory.length,
-      );
-      if (numRunsRemaining === 0) {
-        gradingEligibility = { eligible: false };
-      } else {
-        gradingEligibility = {
-          eligible: true,
-          source: { type: "EXTENSION", extensionid: extensions[0].id },
-          numRunsRemaining,
-          runsRemainingPeriod: extensions[0].quotaPeriod as any,
-        };
-      }
-    }
+    return { eligible: false };
   }
 
-  return await getGradingEligibilityOutput.parseAsync(gradingEligibility);
+  const assignmentDueDatePromise = getAssignmentDueDate({
+    tx,
+    courseId,
+    assignmentId,
+  });
+  const extensionsPromise = getActiveExtensions({
+    tx,
+    courseId,
+    assignmentId,
+    netId,
+  });
+  const assignmentPeriodRunsPromise = getAssignmentQuotaAppliedRuns({
+    tx,
+    courseId,
+    assignmentId,
+    netId,
+    quotaPeriod,
+    quotaAmount,
+    courseTimezone,
+  });
+
+  const [assignmentDueDate, extensions, assignmentPeriodRuns] =
+    await Promise.all([
+      assignmentDueDatePromise,
+      extensionsPromise,
+      assignmentPeriodRunsPromise,
+    ]);
+
+  if (!assignmentDueDate) {
+    throw new DatabaseFetchError({
+      message: "Could not find due date for assignment.",
+    });
+  }
+
+  const now = moment.utc();
+  let gradingEligibility: GetGradingEligibilityOutput;
+
+  const assignmentRunsRemaining = quotaAmount - assignmentPeriodRuns.length;
+  const isWithinAssignmentWindow =
+    visibility === AssignmentVisibility.FORCE_OPEN ||
+    (assignmentDueDate > now && openAt < now);
+
+  if (isWithinAssignmentWindow && assignmentRunsRemaining > 0) {
+    gradingEligibility = {
+      eligible: true,
+      source: { type: "ASSIGNMENT" },
+      numRunsRemaining: assignmentRunsRemaining,
+      runsRemainingPeriod: quotaPeriod as any,
+    };
+  }
+  else if (extensions.length > 0) {
+    const activeExtension = extensions[0];
+    const extensionRunsRemaining =
+      activeExtension.quotaAmount - activeExtension.ExtensionUsageHistory.length;
+
+    if (extensionRunsRemaining > 0) {
+      gradingEligibility = {
+        eligible: true,
+        source: { type: "EXTENSION", extensionid: activeExtension.id },
+        numRunsRemaining: extensionRunsRemaining,
+        runsRemainingPeriod: activeExtension.quotaPeriod as any,
+      };
+    } else {
+      gradingEligibility = { eligible: false };
+    }
+  }
+  else {
+    gradingEligibility = { eligible: false };
+  }
+
+  return getGradingEligibilityOutput.parseAsync(gradingEligibility);
 }
+
 
 export async function getAutogradableAssignments({
   courseId,
@@ -462,10 +466,10 @@ export async function getAutogradableAssignments({
       ...(showInvisible
         ? {}
         : {
-            visibility: {
-              not: AssignmentVisibility.INVISIBLE_FORCE_CLOSE,
-            },
-          }),
+          visibility: {
+            not: AssignmentVisibility.INVISIBLE_FORCE_CLOSE,
+          },
+        }),
       ...(showUnextendable ? {} : { studentExtendable: true }),
       category: {
         in: [AutogradableCategory.LAB, AutogradableCategory.MP],
