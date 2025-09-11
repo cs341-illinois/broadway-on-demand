@@ -45,10 +45,10 @@ export async function getActiveExtensions({
     where: { id: courseId },
     select: { courseTimezone: true },
   });
-  result = result.filter((x) => {
-    switch (x.quotaPeriod) {
+  result = result.filter((extension) => {
+    switch (extension.quotaPeriod) {
       case AssignmentQuota.DAILY:
-        const todayRuns = x.ExtensionUsageHistory.filter((x) => {
+        const todayRuns = extension.ExtensionUsageHistory.filter((usage) => {
           const startDayUtc = moment
             .tz(courseTimezone)
             .startOf("day")
@@ -59,11 +59,11 @@ export async function getActiveExtensions({
             .endOf("day")
             .utc()
             .toDate();
-          return x.createdAt < endDayUtc && x.createdAt > startDayUtc;
+          return usage.createdAt < endDayUtc && usage.createdAt > startDayUtc;
         });
-        return todayRuns.length < x.quotaAmount;
+        return todayRuns.length < extension.quotaAmount;
       case AssignmentQuota.TOTAL:
-        return x.ExtensionUsageHistory.length < x.quotaAmount;
+        return extension.ExtensionUsageHistory.length < extension.quotaAmount;
     }
   });
   return result;
