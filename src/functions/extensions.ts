@@ -15,7 +15,7 @@ export async function getActiveExtensions({
   assignmentId,
   netId,
 }: GetActiveExtensionsInput) {
-  const currentDate = new Date();
+  const currentDate = moment.utc().toDate();
   let result = await tx.extensions
     .findMany({
       where: {
