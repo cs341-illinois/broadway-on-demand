@@ -6,6 +6,7 @@ import {
   JobStatus,
 } from "../generated/prisma/client.js";
 import { JobRepository } from "./types.js";
+import { PrismaClientKnownRequestError } from "../generated/prisma/internal/prismaNamespace.js";
 
 // Define a type for clients that can be either PrismaClient or a transaction client
 type PrismaTransactionClient = Omit<
@@ -69,9 +70,18 @@ export class PrismaJobRepository implements JobRepository {
   }
 
   async deleteJob(id: string): Promise<void> {
-    await this.client.job.delete({
-      where: { id, isScheduledJob: true },
-    });
+    try {
+      await this.client.job.delete({
+        where: { id, isScheduledJob: true },
+      });
+    } catch (e) {
+      if (e instanceof PrismaClientKnownRequestError && e.code === "P2025") {
+        // the job to exist doesn't delete
+        return;
+      }
+      throw e;
+    }
+
   }
 
   /**
