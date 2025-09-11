@@ -427,8 +427,22 @@ export async function getGradingEligibility({
   }
   else if (extensions.length > 0) {
     const activeExtension = extensions[0];
-    const extensionRunsRemaining =
-      activeExtension.quotaAmount - activeExtension.ExtensionUsageHistory.length;
+    let runsUsedInPeriod = 0;
+    switch (activeExtension.quotaPeriod) {
+      // PATCH 09/11/2025: some students weren't able to apply extensions.
+      case AssignmentQuota.DAILY:
+        const startDayUtc = moment.tz(courseTimezone).startOf("day").utc().toDate();
+        const endDayUtc = moment.tz(courseTimezone).endOf("day").utc().toDate();
+        runsUsedInPeriod = activeExtension.ExtensionUsageHistory.filter(
+          (usage) => usage.createdAt > startDayUtc && usage.createdAt < endDayUtc,
+        ).length;
+        break;
+      case AssignmentQuota.TOTAL:
+        runsUsedInPeriod = activeExtension.ExtensionUsageHistory.length;
+        break;
+    }
+
+    const extensionRunsRemaining = activeExtension.quotaAmount - runsUsedInPeriod;
 
     if (extensionRunsRemaining > 0) {
       gradingEligibility = {
