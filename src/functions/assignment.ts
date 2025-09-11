@@ -336,6 +336,7 @@ export type GetGradingEligibilityInput = {
   assignmentId: string;
   netId: string;
   courseTimezone?: string;
+  now?: Moment
 };
 
 export async function getGradingEligibility({
@@ -344,8 +345,10 @@ export async function getGradingEligibility({
   assignmentId,
   netId,
   courseTimezone,
+  now
 }: GetGradingEligibilityInput): Promise<GetGradingEligibilityOutput> {
   // Determine eligibility based on original assignment
+  now = now || moment.utc();
   courseTimezone =
     courseTimezone ||
     (
@@ -408,8 +411,6 @@ export async function getGradingEligibility({
       message: "Could not find due date for assignment.",
     });
   }
-
-  const now = moment.utc();
   let gradingEligibility: GetGradingEligibilityOutput;
 
   const assignmentRunsRemaining = quotaAmount - assignmentPeriodRuns.length;
