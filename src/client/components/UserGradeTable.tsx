@@ -6,12 +6,13 @@ import {
   Button,
   Row,
 } from "react-bootstrap";
-import { UserGradesResponse } from "../../types/grades";
+import { getUserGradesResponseSchema, UserGradesResponse } from "../../types/grades";
 import moment from "moment-timezone";
 import { useForm } from "react-hook-form";
 import { useState } from "react";
 import ConfirmationModal from "./ConfirmationModal";
 import { useAlert } from "../contexts/AlertContext";
+import ViewStatsModal from "./ViewStatsModal";
 
 export type GradeEditFunction = (
   data: GradesForm,
@@ -52,6 +53,7 @@ export function UserGradeTable({
   });
   const [confirmationModal, setConfirmationModal] = useState<boolean>(false);
   const [processing, setProcessing] = useState<boolean>(false);
+  const [showViewStats, setShowViewStats] = useState<boolean>(false);
   const { errors, isDirty, dirtyFields } = formState;
   const { showAlert } = useAlert();
   const {
@@ -72,6 +74,9 @@ export function UserGradeTable({
         return obj;
       }, {} as GradesForm);
   };
+  const handleViewStatsClick = () => {
+    setShowViewStats(true);
+  };
 
   return (
     <>
@@ -82,6 +87,7 @@ export function UserGradeTable({
             <th>Score</th>
             <th>Comments</th>
             <th>Last Updated</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -149,10 +155,14 @@ export function UserGradeTable({
                     )}
                   </td>
                 </OverlayTrigger>
+                <td>
+                    <Button onClick={handleViewStatsClick}>View Stats</Button>
+                </td>
               </tr>
             ))}
         </tbody>
       </Table>
+      {showViewStats && (<ViewStatsModal show={showViewStats} onCancel={() => setShowViewStats(false)}/>)}
       {isDirty && setGradeChanges && (
         <>
           <Row className="d-flex align-items-end">
