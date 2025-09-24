@@ -6,13 +6,14 @@ import {
   Button,
   Row,
 } from "react-bootstrap";
-import { getUserGradesResponseSchema, UserGradesResponse } from "../../types/grades";
+import { UserGradesResponse } from "../../types/grades";
 import moment from "moment-timezone";
 import { useForm } from "react-hook-form";
 import { useState } from "react";
 import ConfirmationModal from "./ConfirmationModal";
 import { useAlert } from "../contexts/AlertContext";
 import ViewStatsModal from "./ViewStatsModal";
+import { formulateUrl } from "../utils";
 
 export type GradeEditFunction = (
   data: GradesForm,
@@ -22,6 +23,7 @@ interface UserGradeTableProps {
   grades: UserGradesResponse;
   category: string;
   setGradeChanges?: GradeEditFunction;
+  courseId: string;
 }
 
 export type GradesForm = {
@@ -46,11 +48,13 @@ export function UserGradeTable({
   grades,
   category,
   setGradeChanges,
+  courseId,
 }: UserGradeTableProps) {
   const isEditable = Boolean(setGradeChanges);
   const { register, formState, getValues, reset } = useForm<GradesForm>({
     defaultValues: mapGrades(grades),
   });
+  const [assignmentData, setAssignmentData] = useState<any[]>([]);
   const [confirmationModal, setConfirmationModal] = useState<boolean>(false);
   const [processing, setProcessing] = useState<boolean>(false);
   const [showViewStats, setShowViewStats] = useState<boolean>(false);
@@ -74,7 +78,13 @@ export function UserGradeTable({
         return obj;
       }, {} as GradesForm);
   };
-  const handleViewStatsClick = () => {
+  const fetchAssignmentData = async (assignmentId: string) => {
+    const response = await fetch(formulateUrl(`api/v1/courses/${courseId}/assignment/${assignmentId}/grades`));
+    const data = await response.json();
+    setAssignmentData(data.grades || []);
+  };
+  const handleViewStatsClick = async (assignmentId: string) => {
+    await fetchAssignmentData(assignmentId);
     setShowViewStats(true);
   };
 
@@ -156,13 +166,13 @@ export function UserGradeTable({
                   </td>
                 </OverlayTrigger>
                 <td>
-                    <Button onClick={handleViewStatsClick}>View Stats</Button>
+                    <Button onClick={() => handleViewStatsClick(x.id)}>View Stats</Button>
                 </td>
               </tr>
             ))}
         </tbody>
       </Table>
-      {showViewStats && (<ViewStatsModal show={showViewStats} onCancel={() => setShowViewStats(false)}/>)}
+      {showViewStats && (<ViewStatsModal show={showViewStats} data={(assignmentData.map(grade => grade.score))} onCancel={() => setShowViewStats(false)}/>)}
       {isDirty && setGradeChanges && (
         <>
           <Row className="d-flex align-items-end">

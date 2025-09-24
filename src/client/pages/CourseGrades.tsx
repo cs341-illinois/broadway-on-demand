@@ -116,7 +116,7 @@ function GradesContent({ gradesPageResource, courseId }: GradesContentProps) {
                 }
                 key={`${category}-tab`}
               >
-                <UserGradeTable grades={grades} category={category} />
+                <UserGradeTable grades={grades} category={category} courseId={courseId} />
               </Tab>
             ),
           )}
