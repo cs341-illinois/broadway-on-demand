@@ -79,7 +79,6 @@ const statsRoutes: FastifyPluginAsync = async (fastify, _options) => {
                 meanScore: calculateMean(scores),
                 medianScore: calculateMedian(scores),
                 standardDeviation: calculateStandardDeviation(scores),
-                totalScores: scores.length,
                 scores: scores,
             }
 
