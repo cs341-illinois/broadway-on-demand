@@ -6,7 +6,7 @@ import {
   Button,
   Row,
 } from "react-bootstrap";
-import { UserGradesResponse } from "../../types/grades";
+import { StatsResponse } from "../../types/stats";
 import moment from "moment-timezone";
 import { useForm } from "react-hook-form";
 import { useState } from "react";
@@ -14,6 +14,7 @@ import ConfirmationModal from "./ConfirmationModal";
 import { useAlert } from "../contexts/AlertContext";
 import ViewStatsModal from "./ViewStatsModal";
 import { formulateUrl } from "../utils";
+import { UserGradesResponse } from "../../types/grades";
 
 export type GradeEditFunction = (
   data: GradesForm,
@@ -54,7 +55,7 @@ export function UserGradeTable({
   const { register, formState, getValues, reset } = useForm<GradesForm>({
     defaultValues: mapGrades(grades),
   });
-  const [assignmentData, setAssignmentData] = useState<any[]>([]);
+  const [assignmentData, setAssignmentData] = useState<StatsResponse>([] as unknown as StatsResponse);
   const [confirmationModal, setConfirmationModal] = useState<boolean>(false);
   const [processing, setProcessing] = useState<boolean>(false);
   const [showViewStats, setShowViewStats] = useState<boolean>(false);
@@ -78,13 +79,13 @@ export function UserGradeTable({
         return obj;
       }, {} as GradesForm);
   };
-  const fetchAssignmentData = async (assignmentId: string) => {
-    const response = await fetch(formulateUrl(`api/v1/courses/${courseId}/assignment/${assignmentId}/grades`));
+  const fetchAssignmentStats = async (assignmentId: string) => {
+    const response = await fetch(formulateUrl(`api/v1/stats/${courseId}/assignment/${assignmentId}/stats`));
     const data = await response.json();
-    setAssignmentData(data.grades || []);
+    setAssignmentData(data || []);
   };
   const handleViewStatsClick = async (assignmentId: string) => {
-    await fetchAssignmentData(assignmentId);
+    await fetchAssignmentStats(assignmentId);
     setShowViewStats(true);
   };
 
@@ -172,7 +173,7 @@ export function UserGradeTable({
             ))}
         </tbody>
       </Table>
-      {showViewStats && (<ViewStatsModal show={showViewStats} data={(assignmentData.map(grade => grade.score))} onCancel={() => setShowViewStats(false)}/>)}
+      {showViewStats && (<ViewStatsModal show={showViewStats} data={assignmentData} onCancel={() => setShowViewStats(false)}/>)}
       {isDirty && setGradeChanges && (
         <>
           <Row className="d-flex align-items-end">
