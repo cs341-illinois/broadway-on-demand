@@ -96,7 +96,7 @@ const statsRoutes: FastifyPluginAsync = async (fastify, _options) => {
                 binValues: calculateHistogramBins(scores, 10, 0, 100),
             }
 
-            await fastify.redisClient.set(cacheKey, JSON.stringify(response), { EX: 86400});
+            await fastify.redisClient.set(cacheKey, JSON.stringify(response), { EX: 1200});
             await reply.send(response);
         },
     );
