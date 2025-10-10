@@ -29,6 +29,15 @@ const calculateStandardDeviation = (arr: any[]) => {
   const variance = sumOfSquaredDifferences / arr.length;
   return Math.sqrt(variance);
 };
+const calculateHistogramBins = (arr: string | any[], numBins: number, start: number, end: number) => {
+    const binSize = (end - start) / numBins;
+    const bins = Array(numBins).fill(0);
+    for (const val of arr) {
+        const binIndex = Math.min(Math.floor((val - start) / binSize), numBins - 1);
+        bins[binIndex] += 1;
+    }
+    return bins;
+};
 
 const statsRoutes: FastifyPluginAsync = async (fastify, _options) => {
     fastify.withTypeProvider<FastifyZodOpenApiTypeProvider>().get(
@@ -53,6 +62,11 @@ const statsRoutes: FastifyPluginAsync = async (fastify, _options) => {
         },
         async (request, reply) => {
             const { courseId, assignmentId } = request.params;
+            const cacheKey = `stats:${courseId}:${assignmentId}`;
+            const cached = await fastify.redisClient.get(cacheKey);
+            if (cached) {
+                return reply.send(JSON.parse(cached));
+            }
 
             const publishedGrades = (
                 await fastify.prismaClient.publishedGrades
@@ -79,9 +93,10 @@ const statsRoutes: FastifyPluginAsync = async (fastify, _options) => {
                 meanScore: calculateMean(scores),
                 medianScore: calculateMedian(scores),
                 standardDeviation: calculateStandardDeviation(scores),
-                scores: scores,
+                binValues: calculateHistogramBins(scores, 10, 0, 100),
             }
 
+            await fastify.redisClient.set(cacheKey, JSON.stringify(response), { EX: 86400});
             await reply.send(response);
         },
     );

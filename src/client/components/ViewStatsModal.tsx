@@ -20,12 +20,18 @@ const ViewStatsModal: React.FC<ViewStatsModalProps> = ({
         <Modal.Title>Assignment Statistics</Modal.Title>
       </Modal.Header>
       <Modal.Body>
-        <Histogram data={data.scores}/>
-        <div className="d-flex flex-column">
-          <p className="mb-2">Mean: {data.meanScore}</p>
-          <p className="mb-2">Median: {data.medianScore}</p>
-          <p className="mb-2">Standard Deviation: {data.standardDeviation}</p>
-        </div>
+        {data ? (
+          <>
+            <Histogram data={data.binValues}/>
+            <div className="d-flex flex-column">
+              <p className="mb-2">Mean: {data.meanScore}</p>
+              <p className="mb-2">Median: {data.medianScore}</p>
+              <p className="mb-2">Standard Deviation: {data.standardDeviation}</p>
+            </div>
+          </>
+        ) : (
+          <p>Loading...</p>
+        )}
       </Modal.Body>
     </Modal>
   );
