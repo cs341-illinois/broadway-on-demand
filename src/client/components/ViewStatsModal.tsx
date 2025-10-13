@@ -1,5 +1,5 @@
 import React from "react";
-import { Modal } from "react-bootstrap";
+import { Modal, Spinner } from "react-bootstrap";
 import { Histogram } from "./Histogram";
 import { StatsResponse } from "../../types/stats";
 
@@ -22,15 +22,17 @@ const ViewStatsModal: React.FC<ViewStatsModalProps> = ({
       <Modal.Body>
         {data ? (
           <>
-            <Histogram data={data.binValues}/>
+            <Histogram data={data.binValues} xAxisTitle="Grades" yAxisTitle="# of Students" />
             <div className="d-flex flex-column">
-              <p className="mb-2">Mean: {data.meanScore}</p>
-              <p className="mb-2">Median: {data.medianScore}</p>
-              <p className="mb-2">Standard Deviation: {data.standardDeviation}</p>
+              <p className="mb-2"><strong>Mean:</strong> {data.meanScore}</p>
+              <p className="mb-2"><strong>Median:</strong> {data.medianScore}</p>
+              <p className="mb-2"><strong>Standard Deviation:</strong> {data.standardDeviation}</p>
             </div>
           </>
         ) : (
-          <p>Loading...</p>
+          <Spinner animation="border" role="status">
+            <span className="visually-hidden">Loading...</span>
+          </Spinner>
         )}
       </Modal.Body>
     </Modal>
