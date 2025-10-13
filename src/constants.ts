@@ -42,3 +42,5 @@ export const VALID_JOB_STATUS_TRANSITIONS: Record<
 export const STATS_EXPIRY_SECS = 1200;
 // How % wide the histograms are for assignment stats
 export const HISTOGRAM_BIN_WIDTH = 10;
+// How % wide the histogram column markers are for assignment stats
+export const HISTOGRAM_COL_MARKER_HEIGHT = 25;

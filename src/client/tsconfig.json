@@ -19,6 +19,6 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["**/*", "../types"],
+  "include": ["**/*", "../types", "../**/*.ts", "../**/*.tsx"],
   "exclude": ["../../dist", "../generated/**/*", "../generated/*"]
 }
