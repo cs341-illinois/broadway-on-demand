@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { HISTOGRAM_BIN_WIDTH, HISTOGRAM_COL_MARKER_HEIGHT } from '../../constants';
 
 export interface HistogramProps {
   xAxisTitle: string;
@@ -28,7 +29,7 @@ export function Histogram({ data, xAxisTitle, yAxisTitle }: HistogramProps) {
       if (!Plotly || !plotRef.current) return;
 
       const numBins = data.length;
-      const binSize = 10;
+      const binSize = HISTOGRAM_BIN_WIDTH;
 
       const fontFamily = getComputedStyle(document.documentElement)
         .getPropertyValue('--il-font-sans')
@@ -67,7 +68,7 @@ export function Histogram({ data, xAxisTitle, yAxisTitle }: HistogramProps) {
             font: { size: 14, color: '#252525', family: fontFamily }
           },
           tick0: 0,
-          dtick: 1,
+          dtick: HISTOGRAM_COL_MARKER_HEIGHT,
           tickfont: { size: 12, family: fontFamily },
         },
         plot_bgcolor: 'white',

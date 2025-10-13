@@ -61,9 +61,9 @@ const statsRoutes: FastifyPluginAsync = async (fastify, _options) => {
       const scores = publishedGrades.map(grade => grade.score);
 
       const response: StatsResponse = {
-        meanScore: calculateMean(scores),
-        medianScore: calculateMedian(scores, true),
-        standardDeviation: calculateStandardDeviation(scores),
+        meanScore: Math.round(calculateMean(scores) * 100)/100,
+        medianScore: Math.round(calculateMedian(scores, true) * 100)/100,
+        standardDeviation: Math.round(calculateStandardDeviation(scores) * 100)/100,
         binValues: calculateHistogramBins(scores, HISTOGRAM_BIN_WIDTH, 0, 100),
       }
 
