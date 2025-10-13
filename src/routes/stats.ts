@@ -32,9 +32,9 @@ const statsRoutes: FastifyPluginAsync = async (fastify, _options) => {
       const { courseId, assignmentId } = request.params;
       const cacheKey = `stats:${courseId}:${assignmentId}`;
       const cached = await fastify.redisClient.get(cacheKey);
-      // if (cached) {
-      //   return reply.send(JSON.parse(cached));
-      // }
+      if (cached) {
+        return reply.send(JSON.parse(cached));
+      }
 
       const publishedGrades = (
         await fastify.prismaClient.publishedGrades
