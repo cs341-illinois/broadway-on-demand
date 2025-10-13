@@ -34,6 +34,7 @@ import studentInfoRoutes from "./routes/studentInfo.js";
 import attendanceRoutes from "./routes/attendance.js";
 import { type WebSocket } from "ws";
 import websocketRoutes from "./routes/websocket.js";
+import statsRoutes from "./routes/stats.js";
 
 const SESSION_TTL = 86400 * 1000; // 1 day in seconds
 
@@ -237,6 +238,7 @@ async function start() {
       await api.register(graderCallbackRoutes, { prefix: "/callback" });
       await api.register(courseRoutes, { prefix: "/courses" });
       await api.register(gradesRoutes, { prefix: "/grades" });
+      await api.register(statsRoutes, { prefix: "/stats"})
       await api.register(rosterRoutes, { prefix: "/roster" });
       await api.register(extensionRoutes, { prefix: "/extension" });
       await api.register(studentInfoRoutes, { prefix: "/studentInfo" });

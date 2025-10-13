@@ -479,6 +479,9 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
           await tx.publishedGrades.createMany({
             data: body.map((x) => ({ ...x, courseId, assignmentId })),
           });
+          const cacheKey = `stats:${courseId}:${assignmentId}`;
+          await fastify.redisClient.del(cacheKey);
+
           const { redisClient, log: logger } = fastify;
           await updateStudentGradesToGithub({
             redisClient,

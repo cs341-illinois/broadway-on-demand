@@ -6,12 +6,15 @@ import {
   Button,
   Row,
 } from "react-bootstrap";
-import { UserGradesResponse } from "../../types/grades";
+import { StatsResponse } from "../../types/stats";
 import moment from "moment-timezone";
 import { useForm } from "react-hook-form";
 import { useState } from "react";
 import ConfirmationModal from "./ConfirmationModal";
 import { useAlert } from "../contexts/AlertContext";
+import ViewStatsModal from "./ViewStatsModal";
+import { formulateUrl } from "../utils";
+import { UserGradesResponse } from "../../types/grades";
 
 export type GradeEditFunction = (
   data: GradesForm,
@@ -21,6 +24,7 @@ interface UserGradeTableProps {
   grades: UserGradesResponse;
   category: string;
   setGradeChanges?: GradeEditFunction;
+  courseId: string;
 }
 
 export type GradesForm = {
@@ -45,13 +49,16 @@ export function UserGradeTable({
   grades,
   category,
   setGradeChanges,
+  courseId,
 }: UserGradeTableProps) {
   const isEditable = Boolean(setGradeChanges);
   const { register, formState, getValues, reset } = useForm<GradesForm>({
     defaultValues: mapGrades(grades),
   });
+  const [assignmentData, setAssignmentData] = useState<StatsResponse>([] as unknown as StatsResponse);
   const [confirmationModal, setConfirmationModal] = useState<boolean>(false);
   const [processing, setProcessing] = useState<boolean>(false);
+  const [showViewStats, setShowViewStats] = useState<boolean>(false);
   const { errors, isDirty, dirtyFields } = formState;
   const { showAlert } = useAlert();
   const {
@@ -72,6 +79,15 @@ export function UserGradeTable({
         return obj;
       }, {} as GradesForm);
   };
+  const fetchAssignmentStats = async (assignmentId: string) => {
+    const response = await fetch(formulateUrl(`api/v1/stats/${courseId}/assignment/${assignmentId}/stats`));
+    const data = await response.json();
+    setAssignmentData(data || []);
+  };
+  const handleViewStatsClick = async (assignmentId: string) => {
+    await fetchAssignmentStats(assignmentId);
+    setShowViewStats(true);
+  };
 
   return (
     <>
@@ -82,6 +98,7 @@ export function UserGradeTable({
             <th>Score</th>
             <th>Comments</th>
             <th>Last Updated</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -149,10 +166,14 @@ export function UserGradeTable({
                     )}
                   </td>
                 </OverlayTrigger>
+                <td>
+                    <Button onClick={() => handleViewStatsClick(x.id)}>View Stats</Button>
+                </td>
               </tr>
             ))}
         </tbody>
       </Table>
+      {showViewStats && (<ViewStatsModal show={showViewStats} data={assignmentData} onCancel={() => setShowViewStats(false)}/>)}
       {isDirty && setGradeChanges && (
         <>
           <Row className="d-flex align-items-end">

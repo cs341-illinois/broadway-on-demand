@@ -37,3 +37,8 @@ export const VALID_JOB_STATUS_TRANSITIONS: Record<
     ...TERMINAL_STATE_VALID_TRANSITIONS,
   ],
 };
+
+// How long stats are cached for in Redis
+export const STATS_EXPIRY_SECS = 1200;
+// How % wide the histograms are for assignment stats
+export const HISTOGRAM_BIN_WIDTH = 10;
