@@ -207,7 +207,7 @@ async function start() {
         return reply.redirect(`${config.BASE_URL}/dashboard`);
       } catch (error) {
         if (error instanceof Error) {
-          server.log.error(`Authentication error: ${error.message}`);
+          server.log.error(`Authentication error: ${error}`);
         }
         return reply.code(500).send("Authentication failed");
       }
@@ -238,7 +238,7 @@ async function start() {
       await api.register(graderCallbackRoutes, { prefix: "/callback" });
       await api.register(courseRoutes, { prefix: "/courses" });
       await api.register(gradesRoutes, { prefix: "/grades" });
-      await api.register(statsRoutes, { prefix: "/stats"})
+      await api.register(statsRoutes, { prefix: "/stats" })
       await api.register(rosterRoutes, { prefix: "/roster" });
       await api.register(extensionRoutes, { prefix: "/extension" });
       await api.register(studentInfoRoutes, { prefix: "/studentInfo" });
