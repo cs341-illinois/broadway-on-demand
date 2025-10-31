@@ -183,7 +183,7 @@ async function markExtensionExempt(
   courseId: string,
   assignmentId: string,
   extensionId: string,
-): Promise<AssignmentExtensionsGetResponse> {
+): Promise<undefined> {
   const response = await fetch(
     formulateUrl(
       `api/v1/extension/${courseId}/assignment/${assignmentId}/id/${extensionId}/refundStudentExtension`,
@@ -197,7 +197,7 @@ async function markExtensionExempt(
       .catch(() => `HTTP error ${response.status}`);
     throw new Error(`Failed to exempt extension - ${errorText}`);
   }
-  return (await response.json()) as AssignmentExtensionsGetResponse;
+  return;
 }
 
 interface ManageAssignmentContentProps {
