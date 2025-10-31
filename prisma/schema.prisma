@@ -212,6 +212,7 @@ model StagingGrades {
 enum ExtensionInitiator {
   STUDENT
   STAFF
+  STUDENT_EXEMPT // A NQE created by the student but which has been exempted from the cap
 }
 
 model Extensions {

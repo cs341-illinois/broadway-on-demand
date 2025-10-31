@@ -566,5 +566,56 @@ const extensionRoutes: FastifyPluginAsync = async (fastify, _options) => {
       return reply.send(cleaned);
     },
   );
+  fastify.withTypeProvider<FastifyZodOpenApiTypeProvider>().post(
+    "/:courseId/assignment/:assignmentId/id/:extensionId/refundStudentExtension",
+    {
+      onRequest: async (request, reply) => {
+        await fastify.authorize(request, reply, request.params.courseId, [
+          Role.ADMIN,
+        ]);
+      },
+      schema: {
+        params: z.object({
+          courseId: z.string().min(1),
+          assignmentId: z.string().min(1),
+          extensionId: z.string().min(1),
+        }),
+        body: z.null(),
+        response: {
+          201: z.null(),
+        },
+      },
+    },
+    async (request, reply) => {
+      const { courseId, assignmentId, extensionId } = request.params;
+      const createdBy = request.session.user!.email.replace(
+        "@illinois.edu",
+        "",
+      );
+      request.log.info({ courseId, assignmentId, extensionId }, `Extension marked as exempt from NQE cap by ${createdBy}.`)
+      await fastify.prismaClient.extensions.update({
+        where: {
+          id: extensionId,
+          extensionType: ExtensionInitiator.STUDENT
+        },
+        data: {
+          extensionType: ExtensionInitiator.STUDENT_EXEMPT
+        }
+      }).catch((e) => {
+        if (e instanceof BaseError) {
+          throw e;
+        }
+        if (e.code === 'P2025') {
+          request.log.warn({ extensionId }, 'Extension not found or not student-initiated, skipping update.');
+          return;
+        }
+        fastify.log.error(e);
+        throw new DatabaseInsertError({
+          message: "Failed to update extension information.",
+        });
+      });
+      return reply.status(201).send();
+    },
+  );
 };
 export default extensionRoutes;

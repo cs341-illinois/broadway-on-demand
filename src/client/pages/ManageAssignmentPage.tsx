@@ -53,7 +53,7 @@ import {
   JobTypeLabels,
   UpdateAssignmentBody,
 } from "../../types/assignment";
-import { AutogradableCategory, JobType, Role } from "../enums";
+import { AutogradableCategory, ExtensionInitiator, JobType, Role } from "../enums";
 import moment from "moment-timezone";
 import pluralize from "pluralize";
 import { AssignmentExtensionsGetResponse } from "../../types/extension";
@@ -179,6 +179,27 @@ async function deleteExtension(
   return (await response.json()) as AssignmentExtensionsGetResponse;
 }
 
+async function markExtensionExempt(
+  courseId: string,
+  assignmentId: string,
+  extensionId: string,
+): Promise<AssignmentExtensionsGetResponse> {
+  const response = await fetch(
+    formulateUrl(
+      `api/v1/extension/${courseId}/assignment/${assignmentId}/id/${extensionId}/refundStudentExtension`,
+    ),
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    const errorText = await response
+      .json()
+      .then((i) => i.message)
+      .catch(() => `HTTP error ${response.status}`);
+    throw new Error(`Failed to exempt extension - ${errorText}`);
+  }
+  return (await response.json()) as AssignmentExtensionsGetResponse;
+}
+
 interface ManageAssignmentContentProps {
   pageResource: Resource<ManageAssignmentPageData>;
   jobsResource: Resource<AssignmentRuns>;
@@ -296,6 +317,9 @@ function ManageAssignmentContent({
   const [deleteExtensionInfo, setDeleteExtensionInfo] = useState<
     false | { id: string; netId: string }
   >(false);
+  const [exemptExtensionInfo, setExemptExtensionInfo] = useState<
+    false | { id: string; netId: string }
+  >(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
   const handleUpdateAssignment = async (data: UpdateAssignmentBody) => {
@@ -366,6 +390,23 @@ function ManageAssignmentContent({
       showAlert((error as Error).message, "danger");
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  const handleMarkExtensionExempt = async () => {
+    if (!exemptExtensionInfo) {
+      return;
+    }
+    setIsProcessing(true);
+    try {
+      await markExtensionExempt(courseId, assignmentId, exemptExtensionInfo.id);
+      showAlert("Extension marked as exempt successfully!", "success");
+      setResourceKey((prevKey) => prevKey + 1);
+    } catch (error) {
+      showAlert((error as Error).message, "danger");
+    } finally {
+      setIsProcessing(false);
+      setExemptExtensionInfo(false);
     }
   };
 
@@ -612,6 +653,7 @@ function ManageAssignmentContent({
                             rel="noopener noreferrer"
                             size="sm"
                             variant="outline-danger"
+                            className="me-2"
                             onClick={(e) => {
                               e.preventDefault();
                               setDeleteExtensionInfo({
@@ -622,6 +664,23 @@ function ManageAssignmentContent({
                           >
                             Delete
                           </Button>
+                          {isAdmin && x.extensionType === ExtensionInitiator.STUDENT && (
+                            <Button
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              size="sm"
+                              variant="outline-warning"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                setExemptExtensionInfo({
+                                  id: x.id,
+                                  netId: x.netId,
+                                });
+                              }}
+                            >
+                              Mark Exempt
+                            </Button>
+                          )}
                         </td>
                       ) : null}
                     </tr>
@@ -741,6 +800,18 @@ function ManageAssignmentContent({
         message={
           deleteExtensionInfo
             ? `Are you sure you would like to delete this extension for ${deleteExtensionInfo.netId}? The data will be irrecoverable!`
+            : null
+        }
+      />
+      <ConfirmationModal
+        show={exemptExtensionInfo !== false}
+        onCancel={() => !isProcessing && setExemptExtensionInfo(false)}
+        isProcessing={isProcessing}
+        onConfirm={handleMarkExtensionExempt}
+        title="Confirm Mark Extension Exempt"
+        message={
+          exemptExtensionInfo
+            ? `Are you sure you would like to mark this extension as exempt for ${exemptExtensionInfo.netId}? This extension will no longer count against their cap.`
             : null
         }
       />
