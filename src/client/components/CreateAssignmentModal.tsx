@@ -5,6 +5,7 @@ import {
   createAssignmentBodySchema,
   CategoryLabels,
   AssignmentVisibilityLabels,
+  updateAssignmentBodySchema,
 } from "../../types/assignment";
 import {
   AutogradableCategory,
@@ -18,19 +19,32 @@ import {
   formatDateForDateTimeLocalInput,
   setEndOfDay,
 } from "../utils";
+import { z } from "zod";
 
-// Use the Zod schema from the import
-type AssignmentFormData = typeof createAssignmentBodySchema._type;
+// Infer types from schemas
+type CreateAssignmentFormData = z.infer<typeof createAssignmentBodySchema>;
+type UpdateAssignmentFormData = z.infer<typeof updateAssignmentBodySchema>;
 
-// Define the component props interface
-export interface AssignmentModalProps<T> {
+// Define separate component variants
+interface CreateAssignmentModalProps {
   show: boolean;
   handleClose: () => void;
-  handleSubmit: (data: T) => void;
-  initialData?: T;
+  handleSubmit: (data: CreateAssignmentFormData) => void;
+  initialData?: Partial<CreateAssignmentFormData>;
   disabled?: boolean;
-  verb?: string;
+  verb?: "Create";
 }
+
+interface ModifyAssignmentModalProps {
+  show: boolean;
+  handleClose: () => void;
+  handleSubmit: (data: UpdateAssignmentFormData) => void;
+  initialData?: Partial<UpdateAssignmentFormData>;
+  disabled?: boolean;
+  verb: "Modify";
+}
+
+type AssignmentModalProps = CreateAssignmentModalProps | ModifyAssignmentModalProps;
 
 const DEFAULT_NON_EXTENDABLE = [
   "nonstop_networking_pt3",
@@ -38,23 +52,16 @@ const DEFAULT_NON_EXTENDABLE = [
   "malloc_contest",
 ];
 
-export default function AssignmentModal({
-  show,
-  handleClose,
-  handleSubmit: onExternalSubmit,
-  initialData,
-  disabled,
-  verb,
-}: AssignmentModalProps<AssignmentFormData>) {
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-    reset,
-    control,
-    setValue,
-  } = useForm<AssignmentFormData>({
-    resolver: zodResolver(createAssignmentBodySchema),
+export default function AssignmentModal(props: AssignmentModalProps) {
+  const { show, handleClose, handleSubmit: onExternalSubmit, initialData, disabled, verb } = props;
+  const isModifyMode = verb === "Modify";
+
+  // Use conditional types to get the right form data type
+  const ourUpdate = updateAssignmentBodySchema
+  const formMethods = useForm<CreateAssignmentFormData | UpdateAssignmentFormData>({
+    resolver: isModifyMode
+      ? zodResolver(ourUpdate)
+      : zodResolver(createAssignmentBodySchema),
     defaultValues: initialData || {
       name: "",
       id: "",
@@ -72,12 +79,25 @@ export default function AssignmentModal({
     disabled,
   });
 
-  const onSubmit = (data: AssignmentFormData) => {
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+    reset,
+    control,
+    setValue,
+  } = formMethods;
+
+  const onSubmit = (data: CreateAssignmentFormData | UpdateAssignmentFormData) => {
     data.quotaAmount = Number(data.quotaAmount);
     if (data.jenkinsPipelineName?.trim() === "") {
       data.jenkinsPipelineName = undefined;
     }
-    onExternalSubmit(data);
+    if (isModifyMode) {
+      onExternalSubmit(data as UpdateAssignmentFormData);
+    } else {
+      onExternalSubmit(data as CreateAssignmentFormData);
+    }
     reset();
     handleClose();
   };
@@ -86,20 +106,23 @@ export default function AssignmentModal({
     control,
     name: "name",
   });
-  useEffect(() => {
-    if (nameValue) {
-      const generatedId = nameValue
-        .toLowerCase()
-        .replace(/\s+/g, "_")
-        .replaceAll("part_", "pt")
-        .replaceAll("week_", "week");
-      setValue("id", generatedId);
-    } else {
-      setValue("id", "");
-    }
-  }, [nameValue, setValue]);
 
-  // Watch the name field value
+  useEffect(() => {
+    if (!isModifyMode) {
+      if (nameValue) {
+        const generatedId = nameValue
+          .toLowerCase()
+          .replace(/\s+/g, "_")
+          .replaceAll("part_", "pt")
+          .replaceAll("week_", "week");
+        setValue("id", generatedId);
+      } else {
+        setValue("id", "");
+      }
+    }
+  }, [nameValue, setValue, isModifyMode]);
+
+  // Watch the id field value
   const idWatch = useWatch({
     control,
     name: "id",
@@ -127,7 +150,7 @@ export default function AssignmentModal({
               {errors.name?.message}
             </Form.Control.Feedback>
           </Form.Group>
-          {!verb && (
+          {!isModifyMode && (
             <Form.Group className="mb-3">
               <Form.Label>ID</Form.Label>
               <Form.Control {...register("id")} isInvalid={!!errors.id} />
