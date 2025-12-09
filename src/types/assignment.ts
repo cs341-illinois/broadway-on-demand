@@ -39,10 +39,10 @@ export const JobStatusColors: HumanReadableEnum<typeof JobStatus> = {
 };
 
 export const AssignmentQuotaLabels: HumanReadableEnum<typeof AssignmentQuota> =
-  {
-    DAILY: "per day",
-    TOTAL: "total",
-  };
+{
+  DAILY: "per day",
+  TOTAL: "total",
+};
 
 export const CategoryLabels: HumanReadableEnum<typeof Category> = {
   LAB: "Lab",
@@ -87,13 +87,15 @@ export const createAssignmentBodySchema = coreAssignmentBodySchema
     path: ["dueAt"],
   });
 
-export const updateAssignmentBodySchema = coreAssignmentBodySchema.refine(
-  (data) => new Date(data.dueAt) > new Date(data.openAt),
-  {
-    message: "Assignment due date must be after open date.",
-    path: ["dueAt"],
-  },
-);
+export const updateAssignmentBodySchema = coreAssignmentBodySchema.
+  extend({ id: z.string().min(1, "You must specify an assignment ID.") })
+  .refine(
+    (data) => new Date(data.dueAt) > new Date(data.openAt),
+    {
+      message: "Assignment due date must be after open date.",
+      path: ["dueAt"],
+    },
+  );
 
 export type UpdateAssignmentBody = z.infer<typeof updateAssignmentBodySchema>;
 
