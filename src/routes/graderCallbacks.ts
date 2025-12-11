@@ -38,6 +38,7 @@ const graderCallbackRoutes: FastifyPluginAsync = async (fastify, _options) => {
           grade: z.number().min(0).max(100),
           courseId: z.string().min(1).optional(),
           assignmentId: z.string().min(1).optional(),
+          isRegrade: z.boolean().default(false)
         }),
         params: z.object({
           id: z.string().min(1),
@@ -45,7 +46,8 @@ const graderCallbackRoutes: FastifyPluginAsync = async (fastify, _options) => {
       },
     },
     async (request, reply) => {
-      const { studentId, grade, courseId, assignmentId } = request.body;
+      const { studentId, courseId, assignmentId } = request.body;
+      const grade = request.body.isRegrade ? Math.min(request.body.grade, config.REGRADE_CAP) : request.body.grade;
       const { id } = request.params;
 
       try {
