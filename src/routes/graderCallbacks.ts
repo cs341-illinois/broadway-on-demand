@@ -46,8 +46,8 @@ const graderCallbackRoutes: FastifyPluginAsync = async (fastify, _options) => {
       },
     },
     async (request, reply) => {
-      const { studentId, courseId, assignmentId } = request.body;
-      const grade = request.body.isRegrade ? Math.min(request.body.grade, config.REGRADE_CAP) : request.body.grade;
+      const { studentId, courseId, assignmentId, isRegrade } = request.body;
+      const grade = isRegrade ? Math.min(request.body.grade, config.REGRADE_CAP) : request.body.grade;
       const { id } = request.params;
 
       try {
@@ -82,7 +82,7 @@ const graderCallbackRoutes: FastifyPluginAsync = async (fastify, _options) => {
               courseId,
               assignmentId,
               netId: [],
-              type: JobType.STUDENT_INITIATED,
+              type: isRegrade ? JobType.REGRADE : JobType.STAFF_INITIATED,
               status: JobStatus.RUNNING,
               dueAt: new Date().toISOString(),
               scheduledAt: new Date().toISOString(),
