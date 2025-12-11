@@ -36,6 +36,8 @@ const graderCallbackRoutes: FastifyPluginAsync = async (fastify, _options) => {
         body: z.object({
           studentId: z.string().min(1),
           grade: z.number().min(0).max(100),
+          courseId: z.string().min(1).optional(),
+          assignmentId: z.string().min(1).optional(),
         }),
         params: z.object({
           id: z.string().min(1),
@@ -43,10 +45,12 @@ const graderCallbackRoutes: FastifyPluginAsync = async (fastify, _options) => {
       },
     },
     async (request, reply) => {
-      const { studentId, grade } = request.body;
+      const { studentId, grade, courseId, assignmentId } = request.body;
       const { id } = request.params;
+
       try {
-        const result = await fastify.prismaClient.job.findFirst({
+        // Try to find an existing registered job
+        let result = await fastify.prismaClient.job.findFirst({
           where: {
             id,
             status: JobStatus.RUNNING,
@@ -54,15 +58,41 @@ const graderCallbackRoutes: FastifyPluginAsync = async (fastify, _options) => {
             netId: { hasSome: [studentId, "_ALL_"] },
           },
           select: {
-            _count: true,
+            id: true,
             courseId: true,
           },
         });
+
+        // If no registered job found, create one on-demand
         if (!result) {
-          throw new ValidationError({
-            message: "Could not find registered eligible grading run.",
+          if (!courseId || !assignmentId) {
+            throw new ValidationError({
+              message:
+                "courseId and assignmentId are required for non-registered runs.",
+            });
+          }
+          request.log.info("No pre-registered run found, creating one")
+
+          result = await fastify.prismaClient.job.create({
+            data: {
+              id,
+              name: "Auto-registered job from Jenkins",
+              courseId,
+              assignmentId,
+              netId: [],
+              type: JobType.STUDENT_INITIATED,
+              status: JobStatus.RUNNING,
+              dueAt: new Date().toISOString(),
+              scheduledAt: new Date().toISOString(),
+              isScheduledJob: false
+            },
+            select: {
+              id: true,
+              courseId: true,
+            },
           });
         }
+
         await fastify.prismaClient.stagingGrades.upsert({
           where: {
             jobId_netId: {
@@ -81,10 +111,14 @@ const graderCallbackRoutes: FastifyPluginAsync = async (fastify, _options) => {
             courseId: result.courseId,
           },
         });
+
         return reply.status(201).send();
       } catch (e) {
         fastify.log.error(e);
-        throw new ValidationError({ message: "Run is not registered." });
+        if (e instanceof ValidationError) {
+          throw e;
+        }
+        throw new ValidationError({ message: "Failed to process grading result." });
       }
     },
   );
