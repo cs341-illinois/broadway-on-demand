@@ -149,13 +149,14 @@ const graderCallbackRoutes: FastifyPluginAsync = async (fastify, _options) => {
           .$transaction(async (tx) => {
             const jobData = await tx.job.findFirst({
               where: { id },
-              select: { courseId: true, assignmentId: true, netId: true },
+              select: { courseId: true, assignmentId: true, netId: true, type: true },
             });
             if (!jobData) {
               throw new ValidationError({
                 message: "Could not find assignment ID for job.",
               });
             }
+            const isRegrade = jobData.type === JobType.REGRADE;
             const { githubOrg, githubToken, gradesRepo } = await tx.course
               .findFirstOrThrow({
                 where: {
@@ -190,8 +191,31 @@ const graderCallbackRoutes: FastifyPluginAsync = async (fastify, _options) => {
                 message: "Could not find staging grades for job.",
               });
             }
-            const promises = results.map((x) =>
-              tx.publishedGrades.upsert({
+
+            // For regrades, fetch existing grades to ensure scores don't decrease
+            let existingGrades = new Map();
+            if (isRegrade) {
+              const existing = await tx.publishedGrades.findMany({
+                where: {
+                  courseId: results[0].courseId,
+                  assignmentId,
+                  netId: { in: results.map(r => r.netId) },
+                },
+                select: {
+                  netId: true,
+                  score: true,
+                },
+              });
+              existingGrades = new Map(existing.map(g => [g.netId, g.score]));
+            }
+
+            const promises = results.map((x) => {
+              // For regrades, use the max of new score and existing score
+              const finalScore = isRegrade && existingGrades.has(x.netId)
+                ? Math.max(x.score, existingGrades.get(x.netId))
+                : x.score;
+
+              return tx.publishedGrades.upsert({
                 where: {
                   courseId_assignmentId_netId: {
                     courseId: results[0].courseId,
@@ -203,15 +227,16 @@ const graderCallbackRoutes: FastifyPluginAsync = async (fastify, _options) => {
                   courseId: results[0].courseId,
                   assignmentId,
                   netId: x.netId,
-                  score: x.score,
+                  score: finalScore,
                   comments: x.comments,
                 },
                 update: {
-                  score: x.score,
+                  score: finalScore,
                   comments: x.comments,
                 },
-              }),
-            );
+              });
+            });
+
             await Promise.allSettled(promises);
             await tx.stagingGrades.deleteMany({
               where: {
