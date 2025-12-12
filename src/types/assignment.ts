@@ -226,7 +226,7 @@ export const getAssignmentRuns = z.array(
     buildUrl: z.string().url().nullable(),
     dueAt: z.string().datetime().optional(),
     scheduledAt: z.string().datetime().optional(),
-    netId: z.array(netIdSchema).min(1),
+    netId: z.array(netIdSchema),
     status: z.nativeEnum(JobStatus),
   }),
 );
