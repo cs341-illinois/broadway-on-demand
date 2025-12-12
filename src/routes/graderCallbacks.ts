@@ -51,67 +51,68 @@ const graderCallbackRoutes: FastifyPluginAsync = async (fastify, _options) => {
       const { id } = request.params;
 
       try {
-        // Try to find an existing registered job
-        let result = await fastify.prismaClient.job.findFirst({
-          where: {
-            id,
-            status: JobStatus.RUNNING,
-            type: { not: JobType.STUDENT_INITIATED },
-            netId: { hasSome: [studentId, "_ALL_"] },
-          },
-          select: {
-            id: true,
-            courseId: true,
-          },
-        });
-
-        // If no registered job found, create one on-demand
-        if (!result) {
-          if (!courseId || !assignmentId) {
-            throw new ValidationError({
-              message:
-                "courseId and assignmentId are required for non-registered runs.",
-            });
-          }
-          request.log.info("No pre-registered run found, creating one")
-
-          result = await fastify.prismaClient.job.create({
-            data: {
+        await fastify.prismaClient.$transaction(async (tx) => {
+          let job = await tx.job.findFirst({
+            where: {
               id,
-              name: "Auto-registered job from Jenkins",
-              courseId,
-              assignmentId,
-              netId: [],
-              type: isRegrade ? JobType.REGRADE : JobType.STAFF_INITIATED,
               status: JobStatus.RUNNING,
-              dueAt: new Date().toISOString(),
-              scheduledAt: new Date().toISOString(),
-              isScheduledJob: false
+              type: { not: JobType.STUDENT_INITIATED },
+              netId: { hasSome: [studentId, "_ALL_"] },
             },
             select: {
               id: true,
               courseId: true,
             },
           });
-        }
 
-        await fastify.prismaClient.stagingGrades.upsert({
-          where: {
-            jobId_netId: {
+          if (!job) {
+            if (!courseId || !assignmentId) {
+              throw new ValidationError({
+                message:
+                  "courseId and assignmentId are required for non-registered runs.",
+              });
+            }
+            request.log.info("No pre-registered run found, creating one");
+            job = await tx.job.upsert({
+              where: { id },
+              create: {
+                id,
+                name: "Auto-registered job from Jenkins",
+                courseId,
+                assignmentId,
+                netId: [],
+                type: isRegrade ? JobType.REGRADE : JobType.STAFF_INITIATED,
+                status: JobStatus.RUNNING,
+                dueAt: new Date().toISOString(),
+                scheduledAt: new Date().toISOString(),
+                isScheduledJob: false,
+              },
+              update: {},
+              select: {
+                id: true,
+                courseId: true,
+              },
+            });
+          }
+
+          await tx.stagingGrades.upsert({
+            where: {
+              jobId_netId: {
+                jobId: id,
+                netId: studentId,
+              },
+              courseId: job.courseId,
+            },
+            update: {
+              score: grade,
+            },
+            create: {
               jobId: id,
               netId: studentId,
+              score: grade,
+              courseId: job.courseId,
             },
-            courseId: result.courseId,
-          },
-          update: {
-            score: grade,
-          },
-          create: {
-            jobId: id,
-            netId: studentId,
-            score: grade,
-            courseId: result.courseId,
-          },
+          });
         });
 
         return reply.status(201).send();
