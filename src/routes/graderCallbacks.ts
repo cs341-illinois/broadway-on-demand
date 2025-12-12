@@ -46,8 +46,7 @@ const graderCallbackRoutes: FastifyPluginAsync = async (fastify, _options) => {
       },
     },
     async (request, reply) => {
-      const { studentId, courseId, assignmentId, isRegrade } = request.body;
-      const grade = isRegrade ? Math.min(request.body.grade, config.REGRADE_CAP) : request.body.grade;
+      const { studentId, courseId, assignmentId, isRegrade, grade: rawGrade } = request.body;
       const { id } = request.params;
 
       try {
@@ -62,6 +61,7 @@ const graderCallbackRoutes: FastifyPluginAsync = async (fastify, _options) => {
             select: {
               id: true,
               courseId: true,
+              assignmentId: true,
             },
           });
 
@@ -91,8 +91,32 @@ const graderCallbackRoutes: FastifyPluginAsync = async (fastify, _options) => {
               select: {
                 id: true,
                 courseId: true,
+                assignmentId: true,
               },
             });
+          }
+
+          // Calculate final grade with regrade logic
+          let finalGrade = rawGrade;
+          if (isRegrade) {
+            // Apply regrade cap
+            finalGrade = Math.min(rawGrade, config.REGRADE_CAP);
+
+            // Ensure grade doesn't decrease from existing published grade
+            const existingGrade = await tx.publishedGrades.findUnique({
+              where: {
+                courseId_assignmentId_netId: {
+                  courseId: job.courseId,
+                  assignmentId: job.assignmentId!,
+                  netId: studentId,
+                },
+              },
+              select: { score: true },
+            });
+
+            if (existingGrade) {
+              finalGrade = Math.max(finalGrade, existingGrade.score);
+            }
           }
 
           await tx.stagingGrades.upsert({
@@ -104,12 +128,12 @@ const graderCallbackRoutes: FastifyPluginAsync = async (fastify, _options) => {
               courseId: job.courseId,
             },
             update: {
-              score: grade,
+              score: finalGrade,
             },
             create: {
               jobId: id,
               netId: studentId,
-              score: grade,
+              score: finalGrade,
               courseId: job.courseId,
             },
           });
@@ -187,35 +211,14 @@ const graderCallbackRoutes: FastifyPluginAsync = async (fastify, _options) => {
                 comments: true,
               },
             });
-            if (!results) {
+            if (!results || results.length === 0) {
               throw new ValidationError({
                 message: "Could not find staging grades for job.",
               });
             }
 
-            // For regrades, fetch existing grades to ensure scores don't decrease
-            let existingGrades = new Map();
-            if (isRegrade) {
-              const existing = await tx.publishedGrades.findMany({
-                where: {
-                  courseId: results[0].courseId,
-                  assignmentId,
-                  netId: { in: results.map(r => r.netId) },
-                },
-                select: {
-                  netId: true,
-                  score: true,
-                },
-              });
-              existingGrades = new Map(existing.map(g => [g.netId, g.score]));
-            }
-
+            // Staging grades already have correct scores (regrade logic applied in addGradingResult)
             const promises = results.map((x) => {
-              // For regrades, use the max of new score and existing score
-              const finalScore = isRegrade && existingGrades.has(x.netId)
-                ? Math.max(x.score, existingGrades.get(x.netId))
-                : x.score;
-
               return tx.publishedGrades.upsert({
                 where: {
                   courseId_assignmentId_netId: {
@@ -228,11 +231,11 @@ const graderCallbackRoutes: FastifyPluginAsync = async (fastify, _options) => {
                   courseId: results[0].courseId,
                   assignmentId,
                   netId: x.netId,
-                  score: finalScore,
+                  score: x.score,
                   comments: x.comments,
                 },
                 update: {
-                  score: finalScore,
+                  score: x.score,
                   comments: x.comments,
                 },
               });
