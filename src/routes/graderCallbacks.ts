@@ -263,7 +263,7 @@ const graderCallbackRoutes: FastifyPluginAsync = async (fastify, _options) => {
               orgName: githubOrg,
               repoName: gradesRepo,
               githubToken,
-              commitMessage: `Publish grades for ${assignmentId}\n\nJob ID ${id}`,
+              commitMessage: `Publish ${isRegrade ? "regrades" : "grades"} for ${assignmentId}\n\nJob ID ${id}`,
               logger: request.log,
             }).catch((e) => {
               if (e instanceof BaseError) {
