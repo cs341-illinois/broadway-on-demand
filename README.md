@@ -2,7 +2,7 @@
 
 ## Overview
 
-Broadway on Demand is the frontend web application for the CS 341 autograder at the University of Illinois.
+Broadway on Demand is the frontend web application for the CS 341 autograder at the University of Illinois. It provides a grading-focused frontend and uses Jenkins as a job runner platform.
 
 This README will guide you through the setup and development process.
 
