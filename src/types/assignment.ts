@@ -49,8 +49,8 @@ export const CategoryLabels: HumanReadableEnum<typeof Category> = {
   MP: "MP",
   ATTENDANCE: "Attendance",
   OTHER: "Other",
-  FINAL: "Final Exam",
-  BONUS: "Extra Credit",
+  FINAL: "Exam",
+  BONUS: "Bonus",
 };
 
 export const JobTypeLabels: HumanReadableEnum<typeof JobType> = {
