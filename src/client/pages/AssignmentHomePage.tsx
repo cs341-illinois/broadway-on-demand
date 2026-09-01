@@ -6,6 +6,7 @@ import {
   Container,
   Modal,
   OverlayTrigger,
+  Badge,
   Row,
   Spinner,
   Table,
@@ -35,7 +36,7 @@ import { LoadingScreen } from "../components/Loading";
 import {
   AssignmentInformationResponse,
   assignmentResponseBody,
-  JobStatusColors, // Zod schema for parsing
+  JobStatusColors,
   JobStatusLabels,
 } from "../../types/assignment";
 import { JobStatus, Role } from "../enums";
@@ -106,7 +107,7 @@ function AssignmentContent({
   courseId,
   assignmentId,
   isStaff,
-  onGradeClick, // 👈 MODIFIED: Prop name changed
+  onGradeClick,
   navigate,
   refreshingData,
 }: AssignmentContentProps) {
@@ -117,6 +118,8 @@ function AssignmentContent({
     "ws",
   );
   const { showAlert } = useAlert();
+  const { user } = useAuth();
+  const currentUserNetId = user?.email?.split("@")[0];
   const { sendJsonMessage, lastJsonMessage, readyState } = useWebSocket(
     socketUrl,
     {
@@ -302,6 +305,54 @@ function AssignmentContent({
             )}
           </Col>
           <Col md={4} xs={12}>
+            {assignmentData.partners && (
+              <Card className="mb-3">
+                <Card.Header as="h4">Lab Partners</Card.Header>
+                <Card.Body>
+                  {assignmentData.partners.labSection ? (
+                    <p className="mb-2">
+                      Lab section:{" "}
+                      <Badge bg="secondary">
+                        {assignmentData.partners.labSection}
+                      </Badge>
+                    </p>
+                  ) : (
+                    <p className="text-muted mb-2">
+                      You aren't assigned to a lab section yet.
+                    </p>
+                  )}
+                  {assignmentData.partners.group ? (
+                    (() => {
+                      const others = assignmentData.partners.group.members.filter(
+                        (member) => member.netId !== currentUserNetId,
+                      );
+                      return others.length > 0 ? (
+                        <p className="mb-0">
+                          Your partner{others.length > 1 ? "s" : ""} for this
+                          assignment:{" "}
+                          {others.map((member) => (
+                            <Badge bg="primary" className="me-1" key={member.netId}>
+                              {member.name
+                                ? `${member.name} (${member.netId})`
+                                : member.netId}
+                            </Badge>
+                          ))}
+                        </p>
+                      ) : (
+                        <p className="text-muted mb-0">
+                          You're on your own this rotation - no partner
+                          assigned.
+                        </p>
+                      );
+                    })()
+                  ) : (
+                    <p className="text-muted mb-0">
+                      No partner group assigned yet for this rotation.
+                    </p>
+                  )}
+                </Card.Body>
+              </Card>
+            )}
             <Card>
               <Card.Header as="h4">Grade Assignment</Card.Header>
               <Card.Body>
@@ -413,9 +464,6 @@ function AssignmentContent({
   );
 }
 
-// ----------------------------------------------------------------
-// --- 👇 ADDED: New Confirmation Modal Component ---
-// ----------------------------------------------------------------
 interface ConfirmRerunModalProps {
   show: boolean;
   handleClose: () => void;
@@ -625,7 +673,7 @@ export default function AssignmentHomePage(): JSX.Element {
         }
         throw new Error(errorMsg);
       }
-      showAlert("Grading job started!", "success"); // Updated message from previous step
+      showAlert("Grading job started!", "success");
       setResourceKey((prevKey) => prevKey + 1);
     } catch (e: unknown) {
       const errorMessage =

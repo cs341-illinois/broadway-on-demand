@@ -181,9 +181,9 @@ const rosterRoutes: FastifyPluginAsync = async (fastify, _options) => {
             });
         }
         if (isModifyingStudent) {
-          const netIdsDirty = await fastify.prismaClient.users
+          const rosterEntriesDirty = await fastify.prismaClient.users
             .findMany({
-              select: { netId: true },
+              select: { netId: true, labSection: true },
               where: { courseId, enabled: true, role: Role.STUDENT },
             })
             .catch((e) => {
@@ -192,12 +192,14 @@ const rosterRoutes: FastifyPluginAsync = async (fastify, _options) => {
                 message: "Failed to get new set of users.",
               });
             });
-          const netIds = netIdsDirty.map((x) => x.netId).sort();
+          const rosterEntries = rosterEntriesDirty.sort((a, b) =>
+            a.netId < b.netId ? -1 : a.netId > b.netId ? 1 : 0,
+          );
           const { redisClient } = fastify;
           const commitMessage = `Roster update by ${adminNetId}\n\nRequest ID: ${request.id}`;
           await overwriteRosterToGithub({
             redisClient,
-            netIds,
+            rosterEntries,
             commitMessage,
             githubToken,
             orgName: githubOrg,
@@ -296,25 +298,30 @@ const rosterRoutes: FastifyPluginAsync = async (fastify, _options) => {
                 }),
               );
             }
-            const { redisClient } = fastify;
-            const commitMessage = `Roster overwrite by ${adminNetId}\n\nRequest ID: ${request.id}`;
-            const netIds = users.map((x) => x.netId).sort();
-            const gheRosterPromise = overwriteRosterToGithub({
-              redisClient,
-              netIds,
-              commitMessage,
-              githubToken,
-              orgName: githubOrg,
-              repoName: rosterRepo,
-              logger: request.log,
-            });
             await Promise.all(enablePromises).catch((e) => {
               request.log.error(e);
               throw new DatabaseInsertError({
                 message: "Failed to insert new students.",
               });
             });
-            await gheRosterPromise;
+            const rosterEntriesDirty = await tx.users.findMany({
+              select: { netId: true, labSection: true },
+              where: { courseId, enabled: true, role: Role.STUDENT },
+            });
+            const rosterEntries = rosterEntriesDirty.sort((a, b) =>
+              a.netId < b.netId ? -1 : a.netId > b.netId ? 1 : 0,
+            );
+            const { redisClient } = fastify;
+            const commitMessage = `Roster overwrite by ${adminNetId}\n\nRequest ID: ${request.id}`;
+            await overwriteRosterToGithub({
+              redisClient,
+              rosterEntries,
+              commitMessage,
+              githubToken,
+              orgName: githubOrg,
+              repoName: rosterRepo,
+              logger: request.log,
+            });
           },
           { timeout: 15000 },
         )

@@ -10,8 +10,12 @@ import {
   UnauthorizedError,
   ValidationError,
 } from "../errors/index.js";
-import { JobStatus, JobType, Role } from "../generated/prisma/client.js";
+import { Category, JobStatus, JobType, Role } from "../generated/prisma/client.js";
 import { updateStudentGradesToGithub } from "../functions/github.js";
+import {
+  getGroupForStudent,
+  getPeriodIndexForAssignment,
+} from "../functions/partners.js";
 import { jobResponse } from "../types/websocket.js";
 import { type WebSocket } from "ws";
 import { VALID_JOB_STATUS_TRANSITIONS } from "../constants.js";
@@ -215,6 +219,52 @@ const graderCallbackRoutes: FastifyPluginAsync = async (fastify, _options) => {
               throw new ValidationError({
                 message: "Could not find staging grades for job.",
               });
+            }
+
+            // Lab partners: on the post-deadline final run, a group's published
+            // grade is the max across whichever members actually have a result
+            // in *this* run - not just whoever's run happened to complete last.
+            if (jobData.type === JobType.FINAL_GRADING) {
+              const assignment = await tx.assignment.findFirst({
+                where: { courseId: jobData.courseId, id: assignmentId },
+                select: { category: true },
+              });
+              if (assignment?.category === Category.LAB) {
+                const periodIndex = await getPeriodIndexForAssignment({
+                  tx,
+                  courseId: jobData.courseId,
+                  assignmentId,
+                });
+                if (periodIndex !== null) {
+                  const scoreByNetId = new Map(
+                    results.map((r) => [r.netId, r.score]),
+                  );
+                  const groupMembersByNetId = new Map<string, string[]>();
+                  for (const result of results) {
+                    if (groupMembersByNetId.has(result.netId)) continue;
+                    const group = await getGroupForStudent({
+                      tx,
+                      courseId: jobData.courseId,
+                      netId: result.netId,
+                      periodIndex,
+                    });
+                    if (!group) continue;
+                    const memberNetIds = group.members.map((m) => m.netId);
+                    for (const netId of memberNetIds) {
+                      groupMembersByNetId.set(netId, memberNetIds);
+                    }
+                  }
+                  for (const result of results) {
+                    const memberNetIds = groupMembersByNetId.get(result.netId);
+                    if (!memberNetIds) continue;
+                    const scoresPresent = memberNetIds
+                      .map((netId) => scoreByNetId.get(netId))
+                      .filter((score): score is number => score !== undefined);
+                    if (scoresPresent.length < 2) continue;
+                    result.score = Math.max(...scoresPresent);
+                  }
+                }
+              }
             }
 
             // Staging grades already have correct scores (regrade logic applied in addGradingResult)

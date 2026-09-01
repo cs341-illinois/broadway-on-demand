@@ -28,13 +28,14 @@ import fastifySession from "@fastify/session";
 import RedisStore from "fastify-session-redis-store";
 import { createClient } from "redis";
 import graderCallbackRoutes from "./routes/graderCallbacks.js";
-import { startScheduledJob } from "./scheduler/handlers.js";
+import { runPartnerRotationJob, startScheduledJob } from "./scheduler/handlers.js";
 import extensionRoutes from "./routes/extension.js";
 import studentInfoRoutes from "./routes/studentInfo.js";
 import attendanceRoutes from "./routes/attendance.js";
 import { type WebSocket } from "ws";
 import websocketRoutes from "./routes/websocket.js";
 import statsRoutes from "./routes/stats.js";
+import partnerRoutes from "./routes/partners.js";
 
 const SESSION_TTL = 86400 * 1000; // 1 day in seconds
 
@@ -91,6 +92,13 @@ async function start() {
     const { redisClient, prismaClient } = server;
     return await startScheduledJob({ job, logger, redisClient, prismaClient });
   });
+  server.scheduler.registerHandler(
+    JobType.PARTNER_ROTATION,
+    async (job, logger) => {
+      const { prismaClient } = server;
+      return await runPartnerRotationJob({ job, logger, prismaClient });
+    },
+  );
   server.scheduler.start();
   server.reconciler = new JobReconciler(server.prismaClient, {
     logger: server.log
@@ -240,6 +248,7 @@ async function start() {
       await api.register(gradesRoutes, { prefix: "/grades" });
       await api.register(statsRoutes, { prefix: "/stats" })
       await api.register(rosterRoutes, { prefix: "/roster" });
+      await api.register(partnerRoutes, { prefix: "/partners" });
       await api.register(extensionRoutes, { prefix: "/extension" });
       await api.register(studentInfoRoutes, { prefix: "/studentInfo" });
       await api.register(attendanceRoutes, { prefix: "/attendance" });

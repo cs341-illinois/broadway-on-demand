@@ -19,9 +19,11 @@ type UpdateStudentGradesGithubInput = {
   logger: FastifyBaseLogger;
 };
 
+export type RosterEntry = { netId: string; labSection?: string | null };
+
 type OverwriteRosterGithubInput = {
   redisClient: RedisClientType;
-  netIds: string[];
+  rosterEntries: RosterEntry[];
   githubToken: string;
   commitMessage: string;
   overwrite?: boolean;
@@ -221,10 +223,17 @@ function generateGradesCsv(gradesData: GradeEntry[]) {
   return header + values;
 }
 
-function generateRosterCsv(netIds: string[]) {
-  const header = "netid,\n";
-  const deduped = [...new Set(netIds)].map((x) => `${x},`);
-  const values = deduped.join("\n");
+function generateRosterCsv(rosterEntries: RosterEntry[]) {
+  const header = "netid,section\n";
+  const seen = new Set<string>();
+  const values = rosterEntries
+    .filter((entry) => {
+      if (seen.has(entry.netId)) return false;
+      seen.add(entry.netId);
+      return true;
+    })
+    .map((entry) => `${entry.netId},${entry.labSection || ""}`)
+    .join("\n");
   return header + values;
 }
 
@@ -337,7 +346,7 @@ async function createOrUpdateFileToGhe({
 
 export async function overwriteRosterToGithub({
   redisClient,
-  netIds,
+  rosterEntries,
   commitMessage,
   githubToken,
   orgName,
@@ -385,7 +394,7 @@ export async function overwriteRosterToGithub({
           githubClient,
         });
 
-        const fileContent = generateRosterCsv(netIds);
+        const fileContent = generateRosterCsv(rosterEntries);
         await createOrUpdateFileToGhe({
           githubOrg: orgName,
           githubRepo: repoName,

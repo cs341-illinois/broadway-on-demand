@@ -44,16 +44,18 @@ model Course {
   Extensions            Extensions[]
   ExtensionUsageHistory ExtensionUsageHistory[]
   AttendanceRecord      AttendanceRecord[]
+  PartnerGroup          PartnerGroup[]
 }
 
 model Users {
-  netId    String
-  role     Role
-  courseId String
-  enabled  Boolean @default(true)
-  course   Course  @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  uin      String?
-  name     String?
+  netId      String
+  role       Role
+  courseId   String
+  enabled    Boolean @default(true)
+  course     Course  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  uin        String?
+  name       String?
+  labSection String?
 
   Grades                PublishedGrades[]
   StagingGrades         StagingGrades[]
@@ -63,6 +65,7 @@ model Users {
   Job                   Job[]
   ExtensionUsageHistory ExtensionUsageHistory[]
   AttendanceRecord      AttendanceRecord[]
+  PartnerGroupMember    PartnerGroupMember[]
 
   @@id([netId, courseId]) // Composite primary key
   @@unique([courseId, uin])
@@ -87,6 +90,7 @@ enum JobType {
   REGRADE
   STAFF_INITIATED
   STAFF_INITIATED_GRADING
+  PARTNER_ROTATION
 }
 
 enum AssignmentVisibility {
@@ -272,4 +276,33 @@ model AttendanceRecord {
 
   @@id([courseId, weekId, netId])
   @@index([courseId, weekId, createdBy])
+}
+
+model PartnerGroup {
+  id          String @id @default(cuid())
+  courseId    String
+  labSection  String
+  periodIndex Int
+  createdBy   String // netId of the staff editor, or "system" for auto-generated groups
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  Course  Course               @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  members PartnerGroupMember[]
+
+  @@index([courseId, labSection, periodIndex])
+}
+
+model PartnerGroupMember {
+  courseId       String
+  netId          String
+  periodIndex    Int
+  partnerGroupId String
+
+  PartnerGroup PartnerGroup @relation(fields: [partnerGroupId], references: [id], onDelete: Cascade)
+  Users        Users        @relation(fields: [netId, courseId], references: [netId, courseId])
+
+  @@id([courseId, netId, periodIndex])
+  @@index([partnerGroupId])
 }

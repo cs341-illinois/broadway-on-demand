@@ -44,3 +44,14 @@ export const STATS_EXPIRY_SECS = 1200;
 export const HISTOGRAM_BIN_WIDTH = 10;
 // How % wide the histogram column markers are for assignment stats
 export const HISTOGRAM_COL_MARKER_HEIGHT = 25;
+
+// How often Lab partner pairings are re-shuffled, in weeks, relative to
+// Course.firstLabDate.
+export const PARTNER_ROTATION_WEEKS = 4;
+
+// Sentinel assignmentId used for scheduled Jobs that aren't tied to a real
+// Assignment row (mirrors the existing "_ALL_" netId sentinel convention).
+export const PARTNER_ROTATION_ASSIGNMENT_ID = "_partner_rotation_";
+
+// createdBy sentinel for auto-generated (as opposed to staff-edited) partner groups.
+export const PARTNER_GROUP_SYSTEM_CREATOR = "system";

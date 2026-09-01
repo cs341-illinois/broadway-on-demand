@@ -183,6 +183,16 @@ function CourseContent({
                       Apply Extension
                     </Button>
                   </Col>
+                  <Col xs={12} sm={6}>
+                    <Button
+                      className="w-100"
+                      onClick={() =>
+                        navigate(formulateUrl(`dashboard/${courseId}/partners`))
+                      }
+                    >
+                      {isStaff ? "Manage Lab Partners" : "My Lab Partner(s)"}
+                    </Button>
+                  </Col>
                   {isStaff && (
                     <>
                       <hr className="w-100 my-2" />

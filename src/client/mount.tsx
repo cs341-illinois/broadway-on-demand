@@ -19,6 +19,7 @@ import StudentInfoPage from "./pages/StudentInfoPage";
 import LabAttendancePage from "./pages/LabAttendancePage";
 import { RouterErrorBoundaryWrapper } from "./components/RouterErrorBoundaryWrapper";
 import AssignmentGradesPage from "./pages/AssignmentGrades";
+import PartnersPage from "./pages/PartnersPage";
 const router = createBrowserRouter([
   {
     path: formulateUrl("/"),
@@ -86,6 +87,15 @@ const router = createBrowserRouter([
     element: (
       <ProtectedRoute>
         <CourseRosterPage />
+      </ProtectedRoute>
+    ),
+    errorElement: <RouterErrorBoundaryWrapper />,
+  },
+  {
+    path: formulateUrl("dashboard/:courseId/partners"),
+    element: (
+      <ProtectedRoute>
+        <PartnersPage />
       </ProtectedRoute>
     ),
     errorElement: <RouterErrorBoundaryWrapper />,

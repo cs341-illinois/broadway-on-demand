@@ -1,5 +1,6 @@
 import { z, ZodLiteral } from "zod";
 import { courseDateString, HumanReadableEnum, netIdSchema } from "./index.js";
+import { partnerGroupMemberEntry } from "./partners.js";
 import {
   AssignmentVisibility,
   AssignmentQuota,
@@ -59,6 +60,7 @@ export const JobTypeLabels: HumanReadableEnum<typeof JobType> = {
   STUDENT_INITIATED: "Student Initiated",
   STAFF_INITIATED: "Staff Initiated",
   STAFF_INITIATED_GRADING: "Final Grading (Staff Initiated)",
+  PARTNER_ROTATION: "Partner Rotation",
 };
 
 export const coreAssignmentBodySchema = z.object({
@@ -202,6 +204,18 @@ export const assignmentResponseBody = z.object({
     }),
     z.null(),
   ]),
+  // Present only for LAB category assignments - null otherwise.
+  partners: z
+    .object({
+      labSection: z.string().nullable(),
+      group: z
+        .object({
+          id: z.string().min(1),
+          members: z.array(partnerGroupMemberEntry),
+        })
+        .nullable(),
+    })
+    .nullable(),
 });
 
 export type AssignmentInformationResponse = z.infer<
