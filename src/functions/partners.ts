@@ -1,28 +1,10 @@
-import moment from "moment-timezone";
 import { Prisma, PrismaClient, Role } from "../generated/prisma/client.js";
-import {
-  PARTNER_GROUP_SYSTEM_CREATOR,
-  PARTNER_ROTATION_WEEKS,
-} from "../constants.js";
-import { getAssignmentDueDate } from "./assignment.js";
 
 type Tx = PrismaClient | Prisma.TransactionClient;
 
-/**
- * 0-based index of the PARTNER_ROTATION_WEEKS-long window `date` falls into,
- * counted from Course.firstLabDate. Dates at or before firstLabDate are
- * period 0.
- */
-export function getPartnerRotationPeriodIndex({
-  firstLabDate,
-  date,
-}: {
-  firstLabDate: Date;
-  date: Date;
-}): number {
-  const weeksSince = moment(date).diff(moment(firstLabDate), "weeks");
-  return Math.max(0, Math.floor(weeksSince / PARTNER_ROTATION_WEEKS));
-}
+const memberInclude = {
+  members: { include: { Users: { select: { name: true } } } },
+} satisfies Prisma.PartnerGroupInclude;
 
 function shuffle<T>(items: T[]): T[] {
   const result = [...items];
@@ -53,120 +35,140 @@ export function generateRandomGroups(netIds: string[]): string[][] {
 }
 
 /**
- * Generates and persists partner groups for every lab section in a course
- * that doesn't already have groups for this period (staff-created or
- * previously auto-generated groups are left untouched, which is also what
- * makes this safe to call more than once for the same period).
+ * Archives whatever PartnerGroup rows are currently active for this
+ * (courseId, labSection, roundNumber), then creates fresh ones from
+ * `groupsOfNetIds`. Archived rows stay queryable via
+ * getSectionRoundHistory/getStudentPartnerHistory.
  */
-export async function runPartnerRotationForCourse({
+export async function archiveAndCreateGroups({
   tx,
   courseId,
-  periodIndex,
+  labSection,
+  roundNumber,
+  groupsOfNetIds,
+  actorNetId,
 }: {
   tx: Prisma.TransactionClient;
   courseId: string;
-  periodIndex: number;
-}): Promise<{ sectionsGrouped: string[]; sectionsSkipped: string[] }> {
-  const students = await tx.users.findMany({
-    where: {
-      courseId,
-      role: Role.STUDENT,
-      enabled: true,
-      labSection: { not: null },
-    },
-    select: { netId: true, labSection: true },
+  labSection: string;
+  roundNumber: number;
+  groupsOfNetIds: string[][];
+  actorNetId: string;
+}) {
+  const now = new Date();
+  await tx.partnerGroup.updateMany({
+    where: { courseId, labSection, roundNumber, archivedAt: null },
+    data: { archivedAt: now, archivedBy: actorNetId },
   });
 
-  const bySection = new Map<string, string[]>();
-  for (const student of students) {
-    const section = student.labSection as string;
-    const list = bySection.get(section) ?? [];
-    list.push(student.netId);
-    bySection.set(section, list);
-  }
-
-  const sectionsGrouped: string[] = [];
-  const sectionsSkipped: string[] = [];
-
-  for (const [labSection, sectionNetIds] of bySection) {
-    const existing = await tx.partnerGroup.findFirst({
-      where: { courseId, labSection, periodIndex },
-      select: { id: true },
-    });
-    if (existing) {
-      sectionsSkipped.push(labSection);
-      continue;
-    }
-
-    for (const memberNetIds of generateRandomGroups(sectionNetIds)) {
+  const created = [];
+  for (const memberNetIds of groupsOfNetIds) {
+    created.push(
       await tx.partnerGroup.create({
         data: {
           courseId,
           labSection,
-          periodIndex,
-          createdBy: PARTNER_GROUP_SYSTEM_CREATOR,
+          roundNumber,
+          createdBy: actorNetId,
           members: {
-            create: memberNetIds.map((netId) => ({ courseId, netId, periodIndex })),
+            create: memberNetIds.map((netId) => ({ courseId, netId, roundNumber })),
           },
         },
-      });
-    }
-    sectionsGrouped.push(labSection);
+        include: memberInclude,
+      }),
+    );
   }
-
-  return { sectionsGrouped, sectionsSkipped };
+  return created;
 }
 
 /**
- * The partner group (if any) a student belongs to for a given rotation
- * period, including all of that group's members.
+ * Whether a section already has an active (non-archived) set of groups for a
+ * round - used to gate "generate" (only allowed when there's nothing to
+ * overwrite) vs. "regenerate"/"edit" (which always overwrite).
+ */
+export async function hasActiveGroups({
+  tx,
+  courseId,
+  labSection,
+  roundNumber,
+}: {
+  tx: Tx;
+  courseId: string;
+  labSection: string;
+  roundNumber: number;
+}): Promise<boolean> {
+  const existing = await tx.partnerGroup.findFirst({
+    where: { courseId, labSection, roundNumber, archivedAt: null },
+    select: { id: true },
+  });
+  return !!existing;
+}
+
+/**
+ * The partner group (if any) a student is currently (non-archived) in for a
+ * given round, including all of that group's members.
  */
 export async function getGroupForStudent({
   tx,
   courseId,
   netId,
-  periodIndex,
+  roundNumber,
 }: {
   tx: Tx;
   courseId: string;
   netId: string;
-  periodIndex: number;
+  roundNumber: number;
 }) {
-  const member = await tx.partnerGroupMember.findUnique({
-    where: { courseId_netId_periodIndex: { courseId, netId, periodIndex } },
-    include: {
-      PartnerGroup: {
-        include: { members: { include: { Users: { select: { name: true } } } } },
-      },
+  const member = await tx.partnerGroupMember.findFirst({
+    where: {
+      courseId,
+      netId,
+      roundNumber,
+      PartnerGroup: { archivedAt: null },
     },
+    include: { PartnerGroup: { include: memberInclude } },
   });
   return member?.PartnerGroup ?? null;
 }
 
 /**
- * Resolves the rotation period an assignment's due date falls into, for
- * looking up the groups that should apply to it. Returns null if the
- * assignment has no scheduled due date (mirrors getAssignmentDueDate).
+ * Every PartnerGroup (active + archived) for one section+round, newest first.
  */
-export async function getPeriodIndexForAssignment({
+export async function getSectionRoundHistory({
   tx,
   courseId,
-  assignmentId,
+  labSection,
+  roundNumber,
 }: {
-  tx: Prisma.TransactionClient;
+  tx: Tx;
   courseId: string;
-  assignmentId: string;
-}): Promise<number | null> {
-  const dueDate = await getAssignmentDueDate({ tx, courseId, assignmentId });
-  if (!dueDate) {
-    return null;
-  }
-  const { firstLabDate } = await tx.course.findFirstOrThrow({
-    where: { id: courseId },
-    select: { firstLabDate: true },
+  labSection: string;
+  roundNumber: number;
+}) {
+  return tx.partnerGroup.findMany({
+    where: { courseId, labSection, roundNumber },
+    include: memberInclude,
+    orderBy: { createdAt: "desc" },
   });
-  return getPartnerRotationPeriodIndex({
-    firstLabDate,
-    date: dueDate.toDate(),
+}
+
+/**
+ * Every group a student has ever belonged to (active + archived), across all
+ * rounds, ordered chronologically - the admin-facing per-student audit view.
+ */
+export async function getStudentPartnerHistory({
+  tx,
+  courseId,
+  netId,
+}: {
+  tx: Tx;
+  courseId: string;
+  netId: string;
+}) {
+  const memberships = await tx.partnerGroupMember.findMany({
+    where: { courseId, netId },
+    include: { PartnerGroup: { include: memberInclude } },
+    orderBy: [{ roundNumber: "asc" }, { PartnerGroup: { createdAt: "asc" } }],
   });
+  return memberships.map((m) => m.PartnerGroup);
 }

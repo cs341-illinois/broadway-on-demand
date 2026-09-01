@@ -28,7 +28,7 @@ import fastifySession from "@fastify/session";
 import RedisStore from "fastify-session-redis-store";
 import { createClient } from "redis";
 import graderCallbackRoutes from "./routes/graderCallbacks.js";
-import { runPartnerRotationJob, startScheduledJob } from "./scheduler/handlers.js";
+import { startScheduledJob } from "./scheduler/handlers.js";
 import extensionRoutes from "./routes/extension.js";
 import studentInfoRoutes from "./routes/studentInfo.js";
 import attendanceRoutes from "./routes/attendance.js";
@@ -92,13 +92,6 @@ async function start() {
     const { redisClient, prismaClient } = server;
     return await startScheduledJob({ job, logger, redisClient, prismaClient });
   });
-  server.scheduler.registerHandler(
-    JobType.PARTNER_ROTATION,
-    async (job, logger) => {
-      const { prismaClient } = server;
-      return await runPartnerRotationJob({ job, logger, prismaClient });
-    },
-  );
   server.scheduler.start();
   server.reconciler = new JobReconciler(server.prismaClient, {
     logger: server.log

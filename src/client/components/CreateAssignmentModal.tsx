@@ -7,6 +7,7 @@ import {
   AssignmentVisibilityLabels,
   updateAssignmentBodySchema,
 } from "../../types/assignment";
+import { PARTNER_MAX_ROUNDS } from "../../constants";
 import {
   AutogradableCategory,
   AssignmentQuota,
@@ -75,6 +76,7 @@ export default function AssignmentModal(props: AssignmentModalProps) {
       ),
       jenkinsPipelineName: undefined,
       studentExtendable: true,
+      partnerRoundNumber: null,
     },
     disabled,
   });
@@ -107,6 +109,11 @@ export default function AssignmentModal(props: AssignmentModalProps) {
     name: "name",
   });
 
+  const categoryValue = useWatch({
+    control,
+    name: "category",
+  });
+
   useEffect(() => {
     if (!isModifyMode) {
       if (nameValue) {
@@ -135,6 +142,12 @@ export default function AssignmentModal(props: AssignmentModalProps) {
       setValue("studentExtendable", true);
     }
   }, [idWatch, setValue]);
+
+  useEffect(() => {
+    if (categoryValue !== AutogradableCategory.LAB) {
+      setValue("partnerRoundNumber", null);
+    }
+  }, [categoryValue, setValue]);
 
   return (
     <Modal show={show} onHide={handleClose}>
@@ -170,6 +183,30 @@ export default function AssignmentModal(props: AssignmentModalProps) {
               ))}
             </Form.Select>
           </Form.Group>
+
+          {categoryValue === AutogradableCategory.LAB && (
+            <Form.Group className="mb-3">
+              <Form.Label>Partner Round</Form.Label>
+              <Form.Select
+                {...register("partnerRoundNumber", {
+                  setValueAs: (v) => (v === "" ? null : Number(v)),
+                })}
+              >
+                <option value="">None (individual assignment)</option>
+                {Array.from({ length: PARTNER_MAX_ROUNDS }, (_, i) => i + 1).map(
+                  (round) => (
+                    <option key={round} value={round}>
+                      Round {round}
+                    </option>
+                  ),
+                )}
+              </Form.Select>
+              <Form.Text className="text-muted">
+                Students see their Round-N partner on this assignment, and
+                post-deadline runs are graded as the max across the group.
+              </Form.Text>
+            </Form.Group>
+          )}
 
           <Form.Group className="mb-3">
             <Form.Label>Visibility</Form.Label>

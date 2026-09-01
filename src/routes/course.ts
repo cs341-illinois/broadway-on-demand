@@ -1,9 +1,6 @@
 import { FastifyPluginAsync } from "fastify";
 import { Category, JobType, Prisma, Role } from "../generated/prisma/client.js";
-import {
-  getGroupForStudent,
-  getPeriodIndexForAssignment,
-} from "../functions/partners.js";
+import { getGroupForStudent } from "../functions/partners.js";
 import { z } from "zod";
 import {
   createAssignment,
@@ -111,6 +108,7 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
         dueAt,
         category,
         studentExtendable,
+        partnerRoundNumber,
       } = request.body;
       try {
         await createAssignment({
@@ -125,6 +123,7 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
           dueAt: new Date(dueAt),
           category,
           studentExtendable,
+          partnerRoundNumber,
         });
         reply.status(201).send();
       } catch (e) {
@@ -292,34 +291,29 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
       }
       let partners: {
         labSection: string | null;
+        roundNumber: number;
         group: {
           id: string;
           members: { netId: string; name: string | null }[];
         } | null;
       } | null = null;
-      if (targetAssignment.category === Category.LAB) {
-        const [userRow, periodIndex] = await Promise.all([
+      const partnerRoundNumber = targetAssignment.partnerRoundNumber;
+      if (targetAssignment.category === Category.LAB && partnerRoundNumber != null) {
+        const [userRow, group] = await Promise.all([
           fastify.prismaClient.users.findUnique({
             where: { netId_courseId: { netId, courseId } },
             select: { labSection: true },
           }),
-          getPeriodIndexForAssignment({
+          getGroupForStudent({
             tx: fastify.prismaClient,
             courseId,
-            assignmentId,
+            netId,
+            roundNumber: partnerRoundNumber,
           }),
         ]);
-        const group =
-          periodIndex !== null
-            ? await getGroupForStudent({
-                tx: fastify.prismaClient,
-                courseId,
-                netId,
-                periodIndex,
-              })
-            : null;
         partners = {
           labSection: userRow?.labSection ?? null,
+          roundNumber: partnerRoundNumber,
           group: group
             ? {
                 id: group.id,

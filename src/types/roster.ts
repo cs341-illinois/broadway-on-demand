@@ -7,12 +7,14 @@ export const rosterUserSchema = z.object({
   role: z.nativeEnum(Role),
   uin: z.string().optional().nullable(),
   name: z.string().optional().nullable(),
+  labSection: z.string().trim().min(1).optional().nullable(),
 });
 
 export const rosterStudentSchema = z.object({
   netId: netIdSchema,
   uin: z.string().min(1),
   name: z.string().min(1),
+  labSection: z.string().trim().min(1).optional().nullable(),
 });
 
 export const manageRosterRequestBodySchema = z.object({

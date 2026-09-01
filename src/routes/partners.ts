@@ -2,49 +2,65 @@ import { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { FastifyZodOpenApiTypeProvider } from "fastify-zod-openapi";
 import { Role } from "../generated/prisma/client.js";
-import {
-  BaseError,
-  DatabaseInsertError,
-  ValidationError,
-} from "../errors/index.js";
+import { BaseError, ConflictError, DatabaseInsertError, ValidationError } from "../errors/index.js";
 import {
   myPartnerGroupResponse,
   partnerGroupEntry,
   PartnerGroupEntry,
-  partnersForPeriodResponse,
+  partnersForRoundResponse,
   putSectionGroupsBodySchema,
-  regenerateSectionBodySchema,
+  sectionRoundHistoryResponse,
+  studentPartnerHistoryResponse,
 } from "../types/partners.js";
 import {
+  archiveAndCreateGroups,
   generateRandomGroups,
   getGroupForStudent,
-  getPartnerRotationPeriodIndex,
+  getSectionRoundHistory,
+  getStudentPartnerHistory,
+  hasActiveGroups,
 } from "../functions/partners.js";
+import { PARTNER_MAX_ROUNDS } from "../constants.js";
+import { netIdSchema } from "../types/index.js";
 
-const periodIndexParams = z.object({
+const roundParams = z.object({
   courseId: z.string().min(1),
-  periodIndex: z.coerce.number().int().min(0),
+  roundNumber: z.coerce.number().int().min(1).max(PARTNER_MAX_ROUNDS),
 });
+
+const roundSectionParams = roundParams.extend({
+  labSection: z.string().min(1),
+});
+
+function sessionNetId(request: { session: { user?: { email: string } } }): string {
+  return request.session.user!.email.replace("@illinois.edu", "");
+}
 
 function toEntry(group: {
   id: string;
   labSection: string;
-  periodIndex: number;
+  roundNumber: number;
   createdBy: string;
+  createdAt: Date;
+  archivedAt: Date | null;
+  archivedBy: string | null;
   members: { netId: string; Users: { name: string | null } }[];
 }): PartnerGroupEntry {
   return {
     id: group.id,
     labSection: group.labSection,
-    periodIndex: group.periodIndex,
+    roundNumber: group.roundNumber,
     createdBy: group.createdBy,
+    createdAt: group.createdAt.toISOString(),
+    archivedAt: group.archivedAt ? group.archivedAt.toISOString() : null,
+    archivedBy: group.archivedBy,
     members: group.members.map((m) => ({ netId: m.netId, name: m.Users.name })),
   };
 }
 
 const partnerRoutes: FastifyPluginAsync = async (fastify, _options) => {
   fastify.withTypeProvider<FastifyZodOpenApiTypeProvider>().get(
-    "/:courseId/currentPeriod",
+    "/:courseId/round/:roundNumber",
     {
       onRequest: async (request, reply) => {
         await fastify.authorize(request, reply, request.params.courseId, [
@@ -53,42 +69,14 @@ const partnerRoutes: FastifyPluginAsync = async (fastify, _options) => {
         ]);
       },
       schema: {
-        params: z.object({ courseId: z.string().min(1) }),
-        response: { 200: z.object({ periodIndex: z.number().int().min(0) }) },
+        params: roundParams,
+        response: { 200: partnersForRoundResponse },
       },
     },
     async (request, reply) => {
-      const { courseId } = request.params;
-      const { firstLabDate } = await fastify.prismaClient.course.findFirstOrThrow({
-        where: { id: courseId },
-        select: { firstLabDate: true },
-      });
-      const periodIndex = getPartnerRotationPeriodIndex({
-        firstLabDate,
-        date: new Date(),
-      });
-      return reply.status(200).send({ periodIndex });
-    },
-  );
-
-  fastify.withTypeProvider<FastifyZodOpenApiTypeProvider>().get(
-    "/:courseId/period/:periodIndex",
-    {
-      onRequest: async (request, reply) => {
-        await fastify.authorize(request, reply, request.params.courseId, [
-          Role.STAFF,
-          Role.ADMIN,
-        ]);
-      },
-      schema: {
-        params: periodIndexParams,
-        response: { 200: partnersForPeriodResponse },
-      },
-    },
-    async (request, reply) => {
-      const { courseId, periodIndex } = request.params;
+      const { courseId, roundNumber } = request.params;
       const groups = await fastify.prismaClient.partnerGroup.findMany({
-        where: { courseId, periodIndex },
+        where: { courseId, roundNumber, archivedAt: null },
         include: { members: { include: { Users: { select: { name: true } } } } },
         orderBy: [{ labSection: "asc" }, { createdAt: "asc" }],
       });
@@ -112,7 +100,7 @@ const partnerRoutes: FastifyPluginAsync = async (fastify, _options) => {
       ].sort();
 
       return reply.status(200).send({
-        periodIndex,
+        roundNumber,
         sections,
         groups: groups.map(toEntry),
         ungroupedNetIds,
@@ -120,8 +108,120 @@ const partnerRoutes: FastifyPluginAsync = async (fastify, _options) => {
     },
   );
 
+  fastify.withTypeProvider<FastifyZodOpenApiTypeProvider>().post(
+    "/:courseId/round/:roundNumber/section/:labSection/generate",
+    {
+      onRequest: async (request, reply) => {
+        await fastify.authorize(request, reply, request.params.courseId, [
+          Role.ADMIN,
+        ]);
+      },
+      schema: {
+        params: roundSectionParams,
+        response: { 200: z.array(partnerGroupEntry) },
+      },
+    },
+    async (request, reply) => {
+      const { courseId, roundNumber, labSection } = request.params;
+      const actorNetId = sessionNetId(request);
+
+      const alreadyActive = await hasActiveGroups({
+        tx: fastify.prismaClient,
+        courseId,
+        labSection,
+        roundNumber,
+      });
+      if (alreadyActive) {
+        throw new ConflictError({
+          message: `Section ${labSection} already has active groups for round ${roundNumber}. Use regenerate instead.`,
+        });
+      }
+
+      const sectionNetIds = (
+        await fastify.prismaClient.users.findMany({
+          where: { courseId, role: Role.STUDENT, enabled: true, labSection },
+          select: { netId: true },
+        })
+      ).map((s) => s.netId);
+      if (sectionNetIds.length === 0) {
+        throw new ValidationError({
+          message: `No enabled students found in lab section ${labSection}.`,
+        });
+      }
+
+      const created = await fastify.prismaClient
+        .$transaction((tx) =>
+          archiveAndCreateGroups({
+            tx,
+            courseId,
+            labSection,
+            roundNumber,
+            groupsOfNetIds: generateRandomGroups(sectionNetIds),
+            actorNetId,
+          }),
+        )
+        .catch((e) => {
+          if (e instanceof BaseError) throw e;
+          request.log.error(e);
+          throw new DatabaseInsertError({ message: "Could not generate partner groups." });
+        });
+
+      return reply.status(200).send(created.map(toEntry));
+    },
+  );
+
+  fastify.withTypeProvider<FastifyZodOpenApiTypeProvider>().post(
+    "/:courseId/round/:roundNumber/section/:labSection/regenerate",
+    {
+      onRequest: async (request, reply) => {
+        await fastify.authorize(request, reply, request.params.courseId, [
+          Role.ADMIN,
+        ]);
+      },
+      schema: {
+        params: roundSectionParams,
+        response: { 200: z.array(partnerGroupEntry) },
+      },
+    },
+    async (request, reply) => {
+      const { courseId, roundNumber, labSection } = request.params;
+      const actorNetId = sessionNetId(request);
+
+      const sectionNetIds = (
+        await fastify.prismaClient.users.findMany({
+          where: { courseId, role: Role.STUDENT, enabled: true, labSection },
+          select: { netId: true },
+        })
+      ).map((s) => s.netId);
+      if (sectionNetIds.length === 0) {
+        throw new ValidationError({
+          message: `No enabled students found in lab section ${labSection}.`,
+        });
+      }
+
+      const created = await fastify.prismaClient
+        .$transaction((tx) =>
+          archiveAndCreateGroups({
+            tx,
+            courseId,
+            labSection,
+            roundNumber,
+            groupsOfNetIds: generateRandomGroups(sectionNetIds),
+            actorNetId,
+          }),
+        )
+        .catch((e) => {
+          if (e instanceof BaseError) throw e;
+          request.log.error(e);
+          throw new DatabaseInsertError({ message: "Could not regenerate partner groups." });
+        });
+
+      return reply.status(200).send(created.map(toEntry));
+    },
+  );
+
   fastify.withTypeProvider<FastifyZodOpenApiTypeProvider>().put(
-    "/:courseId/period/:periodIndex/section",
+    "/:courseId/round/:roundNumber/section/:labSection",
     {
       onRequest: async (request, reply) => {
         await fastify.authorize(request, reply, request.params.courseId, [
@@ -130,18 +230,15 @@ const partnerRoutes: FastifyPluginAsync = async (fastify, _options) => {
         ]);
       },
       schema: {
-        params: periodIndexParams,
+        params: roundSectionParams,
         body: putSectionGroupsBodySchema,
         response: { 200: z.array(partnerGroupEntry) },
       },
     },
     async (request, reply) => {
-      const { courseId, periodIndex } = request.params;
-      const { labSection, groups } = request.body;
-      const staffNetId = request.session.user!.email.replace(
-        "@illinois.edu",
-        "",
-      );
+      const { courseId, roundNumber, labSection } = request.params;
+      const { groups } = request.body;
+      const actorNetId = sessionNetId(request);
 
       const allNetIds = groups.flat();
       if (new Set(allNetIds).size !== allNetIds.length) {
@@ -175,47 +272,28 @@ const partnerRoutes: FastifyPluginAsync = async (fastify, _options) => {
       }
 
       const created = await fastify.prismaClient
-        .$transaction(async (tx) => {
-          await tx.partnerGroup.deleteMany({
-            where: { courseId, labSection, periodIndex },
-          });
-          const result = [];
-          for (const memberNetIds of groups) {
-            result.push(
-              await tx.partnerGroup.create({
-                data: {
-                  courseId,
-                  labSection,
-                  periodIndex,
-                  createdBy: staffNetId,
-                  members: {
-                    create: memberNetIds.map((netId) => ({
-                      courseId,
-                      netId,
-                      periodIndex,
-                    })),
-                  },
-                },
-                include: { members: { include: { Users: { select: { name: true } } } } },
-              }),
-            );
-          }
-          return result;
-        })
+        .$transaction((tx) =>
+          archiveAndCreateGroups({
+            tx,
+            courseId,
+            labSection,
+            roundNumber,
+            groupsOfNetIds: groups,
+            actorNetId,
+          }),
+        )
         .catch((e) => {
           if (e instanceof BaseError) throw e;
           request.log.error(e);
-          throw new DatabaseInsertError({
-            message: "Could not save partner groups.",
-          });
+          throw new DatabaseInsertError({ message: "Could not save partner groups." });
         });
 
       return reply.status(200).send(created.map(toEntry));
     },
   );
 
-  fastify.withTypeProvider<FastifyZodOpenApiTypeProvider>().post(
-    "/:courseId/period/:periodIndex/section/regenerate",
+  fastify.withTypeProvider<FastifyZodOpenApiTypeProvider>().get(
+    "/:courseId/round/:roundNumber/section/:labSection/history",
     {
       onRequest: async (request, reply) => {
         await fastify.authorize(request, reply, request.params.courseId, [
@@ -223,68 +301,43 @@ const partnerRoutes: FastifyPluginAsync = async (fastify, _options) => {
         ]);
       },
       schema: {
-        params: periodIndexParams,
-        body: regenerateSectionBodySchema,
-        response: { 200: z.array(partnerGroupEntry) },
+        params: roundSectionParams,
+        response: { 200: sectionRoundHistoryResponse },
       },
     },
     async (request, reply) => {
-      const { courseId, periodIndex } = request.params;
-      const { labSection } = request.body;
-      const adminNetId = request.session.user!.email.replace(
-        "@illinois.edu",
-        "",
-      );
+      const { courseId, roundNumber, labSection } = request.params;
+      const history = await getSectionRoundHistory({
+        tx: fastify.prismaClient,
+        courseId,
+        labSection,
+        roundNumber,
+      });
+      return reply.status(200).send(history.map(toEntry));
+    },
+  );
 
-      const sectionNetIds = (
-        await fastify.prismaClient.users.findMany({
-          where: { courseId, role: Role.STUDENT, enabled: true, labSection },
-          select: { netId: true },
-        })
-      ).map((s) => s.netId);
-      if (sectionNetIds.length === 0) {
-        throw new ValidationError({
-          message: `No enabled students found in lab section ${labSection}.`,
-        });
-      }
-
-      const created = await fastify.prismaClient
-        .$transaction(async (tx) => {
-          await tx.partnerGroup.deleteMany({
-            where: { courseId, labSection, periodIndex },
-          });
-          const result = [];
-          for (const memberNetIds of generateRandomGroups(sectionNetIds)) {
-            result.push(
-              await tx.partnerGroup.create({
-                data: {
-                  courseId,
-                  labSection,
-                  periodIndex,
-                  createdBy: adminNetId,
-                  members: {
-                    create: memberNetIds.map((netId) => ({
-                      courseId,
-                      netId,
-                      periodIndex,
-                    })),
-                  },
-                },
-                include: { members: { include: { Users: { select: { name: true } } } } },
-              }),
-            );
-          }
-          return result;
-        })
-        .catch((e) => {
-          if (e instanceof BaseError) throw e;
-          request.log.error(e);
-          throw new DatabaseInsertError({
-            message: "Could not regenerate partner groups.",
-          });
-        });
-
-      return reply.status(200).send(created.map(toEntry));
+  fastify.withTypeProvider<FastifyZodOpenApiTypeProvider>().get(
+    "/:courseId/student/:netId/history",
+    {
+      onRequest: async (request, reply) => {
+        await fastify.authorize(request, reply, request.params.courseId, [
+          Role.ADMIN,
+        ]);
+      },
+      schema: {
+        params: z.object({ courseId: z.string().min(1), netId: netIdSchema }),
+        response: { 200: studentPartnerHistoryResponse },
+      },
+    },
+    async (request, reply) => {
+      const { courseId, netId } = request.params;
+      const history = await getStudentPartnerHistory({
+        tx: fastify.prismaClient,
+        courseId,
+        netId,
+      });
+      return reply.status(200).send(history.map(toEntry));
     },
   );
 
@@ -305,41 +358,41 @@ const partnerRoutes: FastifyPluginAsync = async (fastify, _options) => {
     },
     async (request, reply) => {
       const { courseId } = request.params;
-      const netId = request.session.user!.email.replace("@illinois.edu", "");
+      const netId = sessionNetId(request);
 
-      const [{ firstLabDate }, user] = await Promise.all([
-        fastify.prismaClient.course.findFirstOrThrow({
-          where: { id: courseId },
-          select: { firstLabDate: true },
-        }),
-        fastify.prismaClient.users.findUnique({
-          where: { netId_courseId: { netId, courseId } },
-          select: { labSection: true },
-        }),
-      ]);
-      const periodIndex = getPartnerRotationPeriodIndex({
-        firstLabDate,
-        date: new Date(),
+      const user = await fastify.prismaClient.users.findUnique({
+        where: { netId_courseId: { netId, courseId } },
+        select: { labSection: true },
       });
-      const group = await getGroupForStudent({
-        tx: fastify.prismaClient,
-        courseId,
-        netId,
-        periodIndex,
-      });
+
+      const rounds = await Promise.all(
+        Array.from({ length: PARTNER_MAX_ROUNDS }, (_, i) => i + 1).map(
+          async (roundNumber) => {
+            const group = await getGroupForStudent({
+              tx: fastify.prismaClient,
+              courseId,
+              netId,
+              roundNumber,
+            });
+            return {
+              roundNumber,
+              group: group
+                ? {
+                    id: group.id,
+                    members: group.members.map((m) => ({
+                      netId: m.netId,
+                      name: m.Users.name,
+                    })),
+                  }
+                : null,
+            };
+          },
+        ),
+      );
 
       return reply.status(200).send({
-        periodIndex,
         labSection: user?.labSection ?? null,
-        group: group
-          ? {
-              id: group.id,
-              members: group.members.map((m) => ({
-                netId: m.netId,
-                name: m.Users.name,
-              })),
-            }
-          : null,
+        rounds,
       });
     },
   );

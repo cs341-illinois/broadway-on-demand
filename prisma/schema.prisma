@@ -131,6 +131,7 @@ model Assignment {
   jenkinsPipelineName   String?
   quotaAmount           Int
   finalGradingRunId     String?
+  partnerRoundNumber    Int? // 1-4, LAB category only. null = this assignment doesn't use partners.
   openAt                DateTime
   createdAt             DateTime                @default(now())
   updatedAt             DateTime                @updatedAt
@@ -282,8 +283,11 @@ model PartnerGroup {
   id          String @id @default(cuid())
   courseId    String
   labSection  String
-  periodIndex Int
-  createdBy   String // netId of the staff editor, or "system" for auto-generated groups
+  roundNumber Int
+  createdBy   String // netId of the staff editor, admin who (re)generated it, or "system-import" for the historical backfill script
+
+  archivedAt DateTime? // null = currently active group for this (courseId, labSection, roundNumber)
+  archivedBy String? // who triggered the replacement that archived this row
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -291,18 +295,19 @@ model PartnerGroup {
   Course  Course               @relation(fields: [courseId], references: [id], onDelete: Cascade)
   members PartnerGroupMember[]
 
-  @@index([courseId, labSection, periodIndex])
+  @@index([courseId, labSection, roundNumber, archivedAt])
 }
 
 model PartnerGroupMember {
+  id             String @id @default(cuid())
   courseId       String
   netId          String
-  periodIndex    Int
+  roundNumber    Int
   partnerGroupId String
 
   PartnerGroup PartnerGroup @relation(fields: [partnerGroupId], references: [id], onDelete: Cascade)
   Users        Users        @relation(fields: [netId, courseId], references: [netId, courseId])
 
-  @@id([courseId, netId, periodIndex])
-  @@index([partnerGroupId])
+  @@unique([partnerGroupId, netId])
+  @@index([courseId, netId, roundNumber])
 }

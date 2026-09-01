@@ -1,6 +1,7 @@
 import { z, ZodLiteral } from "zod";
 import { courseDateString, HumanReadableEnum, netIdSchema } from "./index.js";
 import { partnerGroupMemberEntry } from "./partners.js";
+import { PARTNER_MAX_ROUNDS } from "../constants.js";
 import {
   AssignmentVisibility,
   AssignmentQuota,
@@ -76,7 +77,25 @@ export const coreAssignmentBodySchema = z.object({
     .transform((val) => (val.trim() === "" ? undefined : val.trim()))
     .optional(),
   studentExtendable: z.boolean(),
+  // LAB category only. null/undefined = no partner requirement.
+  partnerRoundNumber: z
+    .number()
+    .int()
+    .min(1)
+    .max(PARTNER_MAX_ROUNDS)
+    .nullable()
+    .optional(),
 });
+
+function partnerRoundOnlyForLab(data: {
+  category: AutogradableCategory;
+  partnerRoundNumber?: number | null;
+}) {
+  return (
+    data.partnerRoundNumber == null ||
+    data.category === AutogradableCategory.LAB
+  );
+}
 
 export const createAssignmentBodySchema = coreAssignmentBodySchema
   .extend({ id: z.string().min(1, "You must specify an assignment ID.") })
@@ -87,6 +106,10 @@ export const createAssignmentBodySchema = coreAssignmentBodySchema
   .refine((data) => new Date(data.dueAt) > new Date(), {
     message: "Assignment due date must be in the future.",
     path: ["dueAt"],
+  })
+  .refine(partnerRoundOnlyForLab, {
+    message: "Partner round can only be set for Lab assignments.",
+    path: ["partnerRoundNumber"],
   });
 
 export const updateAssignmentBodySchema = coreAssignmentBodySchema.
@@ -97,7 +120,11 @@ export const updateAssignmentBodySchema = coreAssignmentBodySchema.
       message: "Assignment due date must be after open date.",
       path: ["dueAt"],
     },
-  );
+  )
+  .refine(partnerRoundOnlyForLab, {
+    message: "Partner round can only be set for Lab assignments.",
+    path: ["partnerRoundNumber"],
+  });
 
 export type UpdateAssignmentBody = z.infer<typeof updateAssignmentBodySchema>;
 
@@ -127,6 +154,7 @@ export const assignmentsResponseEntry = z.object({
   openAt: courseDateString,
   dueAt: courseDateString,
   studentExtendable: z.boolean(),
+  partnerRoundNumber: z.number().int().min(1).max(PARTNER_MAX_ROUNDS).nullable(),
 });
 
 export type AssignmentResponseEntry = z.infer<typeof assignmentsResponseEntry>;
@@ -204,10 +232,11 @@ export const assignmentResponseBody = z.object({
     }),
     z.null(),
   ]),
-  // Present only for LAB category assignments - null otherwise.
+  // Present only for LAB assignments tagged with a partner round.
   partners: z
     .object({
       labSection: z.string().nullable(),
+      roundNumber: z.number().int().min(1).max(PARTNER_MAX_ROUNDS),
       group: z
         .object({
           id: z.string().min(1),

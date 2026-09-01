@@ -12,10 +12,7 @@ import {
 } from "../errors/index.js";
 import { Category, JobStatus, JobType, Role } from "../generated/prisma/client.js";
 import { updateStudentGradesToGithub } from "../functions/github.js";
-import {
-  getGroupForStudent,
-  getPeriodIndexForAssignment,
-} from "../functions/partners.js";
+import { getGroupForStudent } from "../functions/partners.js";
 import { jobResponse } from "../types/websocket.js";
 import { type WebSocket } from "ws";
 import { VALID_JOB_STATUS_TRANSITIONS } from "../constants.js";
@@ -227,42 +224,39 @@ const graderCallbackRoutes: FastifyPluginAsync = async (fastify, _options) => {
             if (jobData.type === JobType.FINAL_GRADING) {
               const assignment = await tx.assignment.findFirst({
                 where: { courseId: jobData.courseId, id: assignmentId },
-                select: { category: true },
+                select: { category: true, partnerRoundNumber: true },
               });
-              if (assignment?.category === Category.LAB) {
-                const periodIndex = await getPeriodIndexForAssignment({
-                  tx,
-                  courseId: jobData.courseId,
-                  assignmentId,
-                });
-                if (periodIndex !== null) {
-                  const scoreByNetId = new Map(
-                    results.map((r) => [r.netId, r.score]),
-                  );
-                  const groupMembersByNetId = new Map<string, string[]>();
-                  for (const result of results) {
-                    if (groupMembersByNetId.has(result.netId)) continue;
-                    const group = await getGroupForStudent({
-                      tx,
-                      courseId: jobData.courseId,
-                      netId: result.netId,
-                      periodIndex,
-                    });
-                    if (!group) continue;
-                    const memberNetIds = group.members.map((m) => m.netId);
-                    for (const netId of memberNetIds) {
-                      groupMembersByNetId.set(netId, memberNetIds);
-                    }
+              if (
+                assignment?.category === Category.LAB &&
+                assignment.partnerRoundNumber != null
+              ) {
+                const roundNumber = assignment.partnerRoundNumber;
+                const scoreByNetId = new Map(
+                  results.map((r) => [r.netId, r.score]),
+                );
+                const groupMembersByNetId = new Map<string, string[]>();
+                for (const result of results) {
+                  if (groupMembersByNetId.has(result.netId)) continue;
+                  const group = await getGroupForStudent({
+                    tx,
+                    courseId: jobData.courseId,
+                    netId: result.netId,
+                    roundNumber,
+                  });
+                  if (!group) continue;
+                  const memberNetIds = group.members.map((m) => m.netId);
+                  for (const netId of memberNetIds) {
+                    groupMembersByNetId.set(netId, memberNetIds);
                   }
-                  for (const result of results) {
-                    const memberNetIds = groupMembersByNetId.get(result.netId);
-                    if (!memberNetIds) continue;
-                    const scoresPresent = memberNetIds
-                      .map((netId) => scoreByNetId.get(netId))
-                      .filter((score): score is number => score !== undefined);
-                    if (scoresPresent.length < 2) continue;
-                    result.score = Math.max(...scoresPresent);
-                  }
+                }
+                for (const result of results) {
+                  const memberNetIds = groupMembersByNetId.get(result.netId);
+                  if (!memberNetIds) continue;
+                  const scoresPresent = memberNetIds
+                    .map((netId) => scoreByNetId.get(netId))
+                    .filter((score): score is number => score !== undefined);
+                  if (scoresPresent.length < 2) continue;
+                  result.score = Math.max(...scoresPresent);
                 }
               }
             }

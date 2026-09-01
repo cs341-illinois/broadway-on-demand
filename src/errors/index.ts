@@ -158,6 +158,17 @@ export class DatabaseDeleteError extends BaseError<"DatabaseDeleteError"> {
   }
 }
 
+export class ConflictError extends BaseError<"ConflictError"> {
+  constructor({ message }: { message: string }) {
+    super({
+      name: "ConflictError",
+      id: 112,
+      message,
+      httpStatusCode: 409,
+    });
+  }
+}
+
 export class GithubError extends BaseError<"GithubError"> {
   constructor({ message }: { message?: string } = {}) {
     super({

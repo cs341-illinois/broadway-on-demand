@@ -3,10 +3,6 @@ import { type FastifyBaseLogger } from "fastify";
 import { type RedisClientType } from "redis";
 import { InternalServerError } from "../errors/index.js";
 import { startGradingRun } from "../functions/gradeAssignment.js";
-import {
-  getPartnerRotationPeriodIndex,
-  runPartnerRotationForCourse,
-} from "../functions/partners.js";
 
 type StartScheduledJobInput = {
   job: Job;
@@ -113,39 +109,4 @@ export const startScheduledJob = async ({
     await redisClient.del(`scheduler_lock:${jobId}`);
     logger.debug("Released job lock.");
   }
-};
-
-type RunPartnerRotationJobInput = {
-  job: Job;
-  prismaClient: PrismaClient;
-  logger: FastifyBaseLogger;
-};
-
-/**
- * Handler for JobType.PARTNER_ROTATION jobs. Unlike the grading job handlers
- * above, this doesn't talk to Jenkins at all - it just generates this
- * period's Lab partner groups for every lab section that doesn't already
- * have them.
- */
-export const runPartnerRotationJob = async ({
-  job,
-  prismaClient,
-  logger,
-}: RunPartnerRotationJobInput) => {
-  const { firstLabDate } = await prismaClient.course.findFirstOrThrow({
-    where: { id: job.courseId },
-    select: { firstLabDate: true },
-  });
-  const periodIndex = getPartnerRotationPeriodIndex({
-    firstLabDate,
-    date: job.dueAt,
-  });
-  const { sectionsGrouped, sectionsSkipped } = await prismaClient.$transaction(
-    (tx) =>
-      runPartnerRotationForCourse({ tx, courseId: job.courseId, periodIndex }),
-  );
-  logger.info(
-    `Partner rotation for course ${job.courseId}, period ${periodIndex}: ` +
-      `grouped sections [${sectionsGrouped.join(", ")}], already-grouped sections skipped [${sectionsSkipped.join(", ")}].`,
-  );
 };

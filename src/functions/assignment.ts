@@ -36,6 +36,7 @@ type CreateAssignmentInput = {
   category: Category | AutogradableCategory;
   jenkinsPipelineName?: string;
   studentExtendable: boolean;
+  partnerRoundNumber?: number | null;
 };
 
 type DeleteAssignmentInput = {
@@ -59,6 +60,7 @@ export async function createAssignment({
   category,
   jenkinsPipelineName,
   studentExtendable,
+  partnerRoundNumber,
 }: CreateAssignmentInput) {
   await client
     .$transaction(async (tx) => {
@@ -76,6 +78,7 @@ export async function createAssignment({
             category,
             jenkinsPipelineName,
             studentExtendable,
+            partnerRoundNumber,
           },
         })
         .catch((e) => {
@@ -133,6 +136,7 @@ export async function modifyAssignment({
   openAt,
   category,
   jenkinsPipelineName,
+  partnerRoundNumber,
 }: CreateAssignmentInput) {
   await client.$transaction(async (tx) => {
     const jobRepo = new PrismaJobRepository(tx);
@@ -152,6 +156,7 @@ export async function modifyAssignment({
           openAt,
           category,
           jenkinsPipelineName,
+          partnerRoundNumber,
         },
         select: {
           finalGradingRunId: true,

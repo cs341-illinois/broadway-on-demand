@@ -3,10 +3,9 @@ import {
   useEffect,
   Suspense,
   useMemo,
-  // useCallback, // Not directly used in parent, but in Content
   Dispatch,
   SetStateAction,
-  useRef, // Added for file input
+  useRef,
 } from "react";
 import {
   Container,
@@ -49,10 +48,12 @@ interface RosterUser {
   role: Role;
   uin?: string;
   name?: string;
+  labSection?: string | null;
 }
 interface Student extends RosterUser {
   originalName?: string;
   originalUin?: string;
+  originalLabSection?: string | null;
 }
 
 interface ManageRosterResponse {
@@ -66,6 +67,7 @@ interface RosterUserPayload {
   role: Role;
   name?: string;
   uin?: string;
+  labSection?: string | null;
 }
 
 interface CourseRosterPageData {
@@ -138,6 +140,7 @@ async function getCourseRosterPageData(
     ...u,
     originalName: u.name,
     originalUin: u.uin,
+    originalLabSection: u.labSection,
   }));
   return { courseDetails, initialRoster };
 }
@@ -255,7 +258,6 @@ function CourseRosterContent({
   };
 
   const handleUpdateStudentDetails = async (studentToUpdate: Student) => {
-    // ... (existing handleUpdateStudentDetails logic)
     if (!isAdmin) return;
     if (
       studentToUpdate.role === Role.STUDENT &&
@@ -277,6 +279,7 @@ function CourseRosterContent({
       role: studentToUpdate.role,
       name: studentToUpdate.name?.trim(),
       uin: studentToUpdate.uin?.trim() || undefined,
+      labSection: studentToUpdate.labSection?.trim() || undefined,
     };
     try {
       const response = await manageRosterAPI(courseId, "add", [payload]);
@@ -299,7 +302,6 @@ function CourseRosterContent({
   };
 
   const showRemoveUserConfirmation = (netIdToRemove: string) => {
-    // ... (existing showRemoveUserConfirmation logic)
     if (!isAdmin) return;
     const userToRemove = localRoster.find((u) => u.netId === netIdToRemove);
     if (!userToRemove) return;
@@ -333,10 +335,9 @@ function CourseRosterContent({
 
   const handleLocalStudentChange = (
     netId: string,
-    field: "name" | "uin" | "role",
+    field: "name" | "uin" | "role" | "labSection",
     value: string,
   ) => {
-    // ... (existing handleLocalStudentChange logic)
     if (!isAdmin) return;
     setLocalRoster((prevRoster) =>
       prevRoster.map((student) =>
@@ -452,6 +453,12 @@ function CourseRosterContent({
             const netIdHeaderKey = findHeaderKey(["netid", "net id"], headers);
             const nameHeaderKey = findHeaderKey(["name", "full name"], headers);
             const uinHeaderKey = findHeaderKey(["uin"], headers);
+            // Optional - a CSV without a section column just leaves existing
+            // lab sections untouched (see the "add" upsert on the server).
+            const labSectionHeaderKey = findHeaderKey(
+              ["section", "lab section", "labsection"],
+              headers,
+            );
 
             if (!netIdHeaderKey || !nameHeaderKey || !uinHeaderKey) {
               const missing: string[] = [];
@@ -481,6 +488,9 @@ function CourseRosterContent({
               const netId = String(row[netIdHeaderKey] || "").trim();
               const name = String(row[nameHeaderKey] || "").trim();
               const uin = String(row[uinHeaderKey] || "").trim();
+              const labSection = labSectionHeaderKey
+                ? String(row[labSectionHeaderKey] || "").trim() || undefined
+                : undefined;
 
               if (netId && name && uin) {
                 uniqueUsersOutputMap.set(netId, {
@@ -488,6 +498,7 @@ function CourseRosterContent({
                   name,
                   uin,
                   role: Role.STUDENT,
+                  labSection,
                 });
               } else {
                 console.warn(
@@ -500,7 +511,12 @@ function CourseRosterContent({
             const finalUsers = Array.from(uniqueUsersOutputMap.values());
             if (finalUsers.length > 0) {
               setCsvUsersToConfirm(
-                finalUsers as { netId: string; uin: string; name: string }[],
+                finalUsers as {
+                  netId: string;
+                  uin: string;
+                  name: string;
+                  labSection?: string | null;
+                }[],
               );
               setShowCsvConfirmModal(true);
             } else {
@@ -558,6 +574,7 @@ function CourseRosterContent({
         netId: user.netId,
         name: user.name,
         uin: user.uin,
+        labSection: user.labSection,
       }),
     );
 
@@ -625,7 +642,6 @@ function CourseRosterContent({
           )}
         </Row>
 
-        {/* ... (rest of the existing JSX for invalid students, staff roster, student roster) ... */}
         {isAdmin && invalidStudents.length > 0 && (
           <Card bg="warning" text="dark" className="mb-4">
             <Card.Header>
@@ -819,6 +835,7 @@ function CourseRosterContent({
                           UIN{" "}
                           {isAdmin && <span className="text-danger">*</span>}
                         </th>
+                        <th>Lab Section</th>
                         {isAdmin && <th>Actions</th>}
                       </tr>
                     </thead>
@@ -876,6 +893,27 @@ function CourseRosterContent({
                               </InputGroup>
                             ) : (
                               sUser.uin || <Badge bg="secondary">N/A</Badge>
+                            )}
+                          </td>
+                          <td>
+                            {isAdmin ? (
+                              <InputGroup size="sm">
+                                <Form.Control
+                                  type="text"
+                                  placeholder="Section"
+                                  value={sUser.labSection || ""}
+                                  onChange={(e) =>
+                                    handleLocalStudentChange(
+                                      sUser.netId,
+                                      "labSection",
+                                      e.target.value,
+                                    )
+                                  }
+                                  disabled={isProcessing}
+                                />
+                              </InputGroup>
+                            ) : (
+                              sUser.labSection || <Badge bg="secondary">N/A</Badge>
                             )}
                           </td>
                           {isAdmin && (
@@ -1084,6 +1122,7 @@ function CourseRosterContent({
                       <th>NetID</th>
                       <th>Name</th>
                       <th>UIN</th>
+                      <th>Lab Section</th>
                       <th>Anticipated Action</th>
                     </tr>
                   </thead>
@@ -1117,6 +1156,7 @@ function CourseRosterContent({
                           <td>{user.netId}</td>
                           <td>{user.name}</td>
                           <td>{user.uin}</td>
+                          <td>{user.labSection || <Badge bg="secondary">N/A</Badge>}</td>
                           <td>{statusBadge}</td>
                         </tr>
                       );
@@ -1136,6 +1176,7 @@ function CourseRosterContent({
                               <td>{user.netId}</td>
                               <td>{user.name}</td>
                               <td>{user.uin}</td>
+                              <td>{user.labSection || <Badge bg="secondary">N/A</Badge>}</td>
                               <td>{statusBadge}</td>
                             </tr>
                           );

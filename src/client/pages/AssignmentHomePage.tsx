@@ -307,7 +307,9 @@ function AssignmentContent({
           <Col md={4} xs={12}>
             {assignmentData.partners && (
               <Card className="mb-3">
-                <Card.Header as="h4">Lab Partners</Card.Header>
+                <Card.Header as="h4">
+                  Lab Partners (Round {assignmentData.partners.roundNumber})
+                </Card.Header>
                 <Card.Body>
                   {assignmentData.partners.labSection ? (
                     <p className="mb-2">
@@ -340,14 +342,14 @@ function AssignmentContent({
                         </p>
                       ) : (
                         <p className="text-muted mb-0">
-                          You're on your own this rotation - no partner
+                          You're on your own this round - no partner
                           assigned.
                         </p>
                       );
                     })()
                   ) : (
                     <p className="text-muted mb-0">
-                      No partner group assigned yet for this rotation.
+                      No partner group assigned yet for this round.
                     </p>
                   )}
                 </Card.Body>

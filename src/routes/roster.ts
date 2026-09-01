@@ -44,6 +44,7 @@ const rosterRoutes: FastifyPluginAsync = async (fastify, _options) => {
             netId: true,
             uin: true,
             role: true,
+            labSection: true,
           },
           orderBy: {
             netId: "asc",
@@ -118,6 +119,7 @@ const rosterRoutes: FastifyPluginAsync = async (fastify, _options) => {
                   name: user.name,
                   role: user.role,
                   enabled: true,
+                  labSection: user.labSection,
                 },
                 create: {
                   netId: user.netId,
@@ -126,6 +128,7 @@ const rosterRoutes: FastifyPluginAsync = async (fastify, _options) => {
                   uin: user.uin,
                   name: user.name,
                   enabled: true,
+                  labSection: user.labSection,
                 },
               });
               processedUsersInfo.push({
@@ -287,6 +290,7 @@ const rosterRoutes: FastifyPluginAsync = async (fastify, _options) => {
                 uin: user.uin,
                 enabled: true,
                 name: user.name,
+                labSection: user.labSection,
               };
               enablePromises.push(
                 tx.users.upsert({
