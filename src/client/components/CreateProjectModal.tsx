@@ -38,7 +38,7 @@ export default function CreateProjectModal({
   const totalWeight = components.reduce((sum, c) => sum + (c.weight || 0), 0);
 
   const repoPreview = repoProjectName
-    ? `{prefix}.${repoProjectName}.team-01 … team-${String(repoCount).padStart(2, "0")}`
+    ? `{prefix}_.${repoProjectName}_.team-001 … team-${String(repoCount).padStart(3, "0")}`
     : "Enter a repo project name to preview";
 
   const addComponent = () => {
@@ -153,7 +153,7 @@ export default function CreateProjectModal({
             isInvalid={!!error && !repoProjectName.trim()}
           />
           <Form.Text className="text-muted">
-            Used in repo names: <code>{`{prefix}.${repoProjectName || "project-01"}.team-01`}</code>.
+            Used in repo names: <code>{`{prefix}_.${repoProjectName || "project-1"}_.team-001`}</code>.
             After creating, run: <code>{`npx tsx src/scripts/importProjectRepoPool.ts <courseId> ${projectKey || "project1"} ${repoProjectName || "project-01"} ${repoCount}`}</code>
           </Form.Text>
         </Form.Group>

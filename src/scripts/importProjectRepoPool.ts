@@ -1,4 +1,4 @@
-// Generates `{githubRepoPrefix}.{repoProjectName}.team-{NN}` names and imports them into ProjectRepoPool
+// Generates `{githubRepoPrefix}_.{repoProjectName}_.team-{NN}` names and imports them into ProjectRepoPool
 // for a (courseId, projectKey). Append-only; rejects names claimed by another projectKey; sortOrder from max+1.
 // Usage: npx tsx src/scripts/importProjectRepoPool.ts <courseId> <projectKey> <repoProjectName> <count>
 import dotenv from "dotenv";
@@ -11,8 +11,8 @@ if (!process.env.DATABASE_URL) {
 
 import { PrismaClient } from "../generated/prisma/client.js";
 
-function pad2(n: number): string {
-  return n.toString().padStart(2, "0");
+function pad3(n: number): string {
+  return n.toString().padStart(3, "0");
 }
 
 async function main() {
@@ -22,7 +22,7 @@ async function main() {
       "Usage: npx tsx src/scripts/importProjectRepoPool.ts <courseId> <projectKey> <repoProjectName> <count>",
     );
     console.error(
-      "Example: npx tsx src/scripts/importProjectRepoPool.ts cs341-fa26 project1 project-01 200",
+      "Example: npx tsx src/scripts/importProjectRepoPool.ts cs341-fa26 project1 project-1 200",
     );
     process.exit(1);
   }
@@ -45,7 +45,7 @@ async function main() {
   const prefix = course.githubRepoPrefix;
   const repoNames: string[] = [];
   for (let i = 1; i <= count; i++) {
-    repoNames.push(`${prefix}.${repoProjectName}.team-${pad2(i)}`);
+    repoNames.push(`${prefix}_.${repoProjectName}_.team-${pad3(i)}`);
   }
 
   await prismaClient.$transaction(async (tx) => {
