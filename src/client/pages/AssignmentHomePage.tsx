@@ -426,8 +426,8 @@ function AssignmentContent({
                     <br />
                     {assignmentData.projectRepo.accessPending && (
                       <p className="text-warning mt-2 mb-2">
-                        Access may be pending. If you cannot view the
-                        repository, please contact course staff.
+                        GitHub access not yet confirmed. If you cannot view the
+                        repository, please contact course staff to sync access.
                       </p>
                     )}
                   </>

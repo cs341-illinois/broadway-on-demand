@@ -127,6 +127,7 @@ function ProjectReposContent({
   const [isExporting, setIsExporting] = useState(false);
   const [isReconciling, setIsReconciling] = useState(false);
   const [showReconcileConfirm, setShowReconcileConfirm] = useState(false);
+  const [isSyncingAccess, setIsSyncingAccess] = useState(false);
 
   useEffect(() => {
     if (projects.length > 0 && !projects.some((p) => p.projectKey === selectedProjectKey)) {
@@ -249,6 +250,34 @@ function ProjectReposContent({
     }
   };
 
+  const handleSyncAccess = async () => {
+    if (!selectedProjectKey) return;
+    setIsSyncingAccess(true);
+    try {
+      const result = await fetchJson<{
+        confirmed: number;
+        added: number;
+        noMapping: number;
+        failed: number;
+        total: number;
+      }>(`api/v1/projectRepos/${courseId}/${selectedProjectKey}/syncAccess`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      const parts: string[] = [];
+      if (result.added) parts.push(`${result.added} newly added`);
+      if (result.confirmed) parts.push(`${result.confirmed} already confirmed`);
+      if (result.noMapping) parts.push(`${result.noMapping} missing username`);
+      if (result.failed) parts.push(`${result.failed} failed`);
+      showAlert(`GitHub access sync: ${parts.join(", ")}.`, result.failed > 0 ? "warning" : "success", 8000);
+      refresh();
+    } catch (error) {
+      showAlert((error as Error).message || "Access sync failed.", "danger");
+    } finally {
+      setIsSyncingAccess(false);
+    }
+  };
+
   const breadcrumb = {
     items: [
       { label: "Course Home", href: formulateUrl(`dashboard/${courseId}`) },
@@ -282,6 +311,17 @@ function ProjectReposContent({
                 Reconcile
               </Button>
               <Button
+                variant="success"
+                onClick={handleSyncAccess}
+                disabled={isSyncingAccess || statusLoading}
+                className="me-2"
+              >
+                {isSyncingAccess ? (
+                  <Spinner as="span" size="sm" animation="border" className="me-1" />
+                ) : null}
+                Sync GitHub Access
+              </Button>
+              <Button
                 variant="outline-secondary"
                 onClick={handleExport}
                 disabled={isExporting || statusLoading}
@@ -296,10 +336,8 @@ function ProjectReposContent({
         </Row>
 
         <Alert variant="info" className="mb-3">
-          <strong>Access may be pending.</strong> Broadway cannot verify whether
-          students actually have GitHub collaborator access to their assigned
-          repo. Confirm with the GitHub org admin if students report access
-          issues.
+          Click <strong>Sync GitHub Access</strong> to add each student as a
+          collaborator on their assigned repo using their mined GitHub username.
         </Alert>
 
         {projects.length === 0 ? (

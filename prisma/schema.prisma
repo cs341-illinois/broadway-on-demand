@@ -393,6 +393,7 @@ model ProjectRepoAssignment {
   sourcePartnerGroupId String?
   releasedAt           DateTime?
   releasedBy           String?
+  githubAccessConfirmed Boolean @default(false)
 
   Course          Course           @relation(fields: [courseId], references: [id], onDelete: Cascade)
   Users           Users            @relation(fields: [netId, courseId], references: [netId, courseId], onDelete: NoAction)

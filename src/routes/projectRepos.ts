@@ -597,6 +597,117 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
       });
     },
   );
+
+  fastify.withTypeProvider<FastifyZodOpenApiTypeProvider>().post(
+    "/:courseId/:projectKey/syncAccess",
+    {
+      onRequest: async (request, reply) => {
+        await fastify.authorize(request, reply, request.params.courseId, [
+          Role.ADMIN,
+        ]);
+      },
+      schema: {
+        params: projectKeyParams,
+        response: { 200: z.object({
+          confirmed: z.number(),
+          added: z.number(),
+          noMapping: z.number(),
+          failed: z.number(),
+          total: z.number(),
+        }) },
+      },
+    },
+    async (request, reply) => {
+      const { courseId, projectKey } = request.params;
+
+      const course = await fastify.prismaClient.course.findUniqueOrThrow({
+        where: { id: courseId },
+        select: { githubOrg: true, githubToken: true },
+      });
+
+      const assignments = await fastify.prismaClient.projectRepoAssignment.findMany({
+        where: { courseId, projectKey, releasedAt: null },
+        select: { id: true, netId: true, repoName: true, githubAccessConfirmed: true },
+      });
+
+      const netIds = [...new Set(assignments.map((a) => a.netId))];
+      const mappings = await fastify.prismaClient.githubUsernameMapping.findMany({
+        where: { courseId, netId: { in: netIds } },
+        select: { netId: true, githubUsername: true },
+      });
+      const usernameByNetId = new Map(mappings.map((m) => [m.netId, m.githubUsername]));
+
+      const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+      let confirmed = 0;
+      let added = 0;
+      let noMapping = 0;
+      let failed = 0;
+
+      for (const a of assignments) {
+        const username = usernameByNetId.get(a.netId);
+        if (!username) { noMapping++; continue; }
+
+        if (a.githubAccessConfirmed) { confirmed++; continue; }
+
+        try {
+          const checkRes = await fetch(
+            `https://api.github.com/repos/${course.githubOrg}/${a.repoName}/collaborators/${username}`,
+            { headers: { Authorization: `Bearer ${course.githubToken}`, Accept: "application/vnd.github+json" } },
+          );
+
+          if (checkRes.status === 204) {
+            confirmed++;
+          } else if (checkRes.status === 404) {
+            const addRes = await fetch(
+              `https://api.github.com/repos/${course.githubOrg}/${a.repoName}/collaborators/${username}`,
+              {
+                method: "PUT",
+                headers: {
+                  Authorization: `Bearer ${course.githubToken}`,
+                  Accept: "application/vnd.github+json",
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ permission: "push" }),
+              },
+            );
+            if (addRes.status !== 201 && addRes.status !== 204) {
+              throw new Error(`Add failed: ${addRes.status}`);
+            }
+            added++;
+          } else {
+            throw new Error(`Check failed: ${checkRes.status}`);
+          }
+
+          await fastify.prismaClient.projectRepoAssignment.update({
+            where: { id: a.id },
+            data: { githubAccessConfirmed: true },
+          });
+
+          await sleep(300);
+        } catch (e: any) {
+          request.log.error(
+            { netId: a.netId, repoName: a.repoName, err: e.message },
+            "Failed to sync GitHub access",
+          );
+          failed++;
+        }
+      }
+
+      request.log.info(
+        { courseId, projectKey, confirmed, added, noMapping, failed, total: assignments.length },
+        "GitHub access sync completed",
+      );
+
+      return reply.status(200).send({
+        confirmed,
+        added,
+        noMapping,
+        failed,
+        total: assignments.length,
+      });
+    },
+  );
 };
 
 export default projectRepoRoutes;

@@ -257,14 +257,14 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
               netId,
               releasedAt: null,
             },
-            select: { repoName: true },
+            select: { repoName: true, githubAccessConfirmed: true },
           });
         if (projectRepoAssignment) {
           repoName = projectRepoAssignment.repoName;
           projectRepo = {
             repoName: projectRepoAssignment.repoName,
             repoUrl: `https://github.com/${githubOrg}/${projectRepoAssignment.repoName}`,
-            accessPending: true,
+            accessPending: !projectRepoAssignment.githubAccessConfirmed,
           };
         } else {
           projectRepo = null;
