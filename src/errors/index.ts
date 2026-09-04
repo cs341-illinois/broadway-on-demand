@@ -169,6 +169,17 @@ export class ConflictError extends BaseError<"ConflictError"> {
   }
 }
 
+export class PrairieLearnApiError extends BaseError<"PrairieLearnApiError"> {
+  constructor({ message }: { message: string }) {
+    super({
+      name: "PrairieLearnApiError",
+      id: 113,
+      message,
+      httpStatusCode: 502,
+    });
+  }
+}
+
 export class GithubError extends BaseError<"GithubError"> {
   constructor({ message }: { message?: string } = {}) {
     super({

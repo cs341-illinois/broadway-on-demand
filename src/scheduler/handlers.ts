@@ -1,4 +1,4 @@
-import { type PrismaClient, Job, Role } from "../generated/prisma/client.js";
+import { type PrismaClient, Job, Role, Category } from "../generated/prisma/client.js";
 import { type FastifyBaseLogger } from "fastify";
 import { type RedisClientType } from "redis";
 import { InternalServerError } from "../errors/index.js";
@@ -39,7 +39,7 @@ export const startScheduledJob = async ({
           jenkinsToken: true,
         },
       });
-    const { jenkinsPipelineName } = await prismaClient.assignment
+    const { jenkinsPipelineName, category, projectKey } = await prismaClient.assignment
       .findFirstOrThrow({
         where: {
           id: job.assignmentId,
@@ -47,6 +47,8 @@ export const startScheduledJob = async ({
         },
         select: {
           jenkinsPipelineName: true,
+          category: true,
+          projectKey: true,
         },
       })
       .catch((e) => {
@@ -69,6 +71,19 @@ export const startScheduledJob = async ({
       });
       netIds = courseStudents.map((x) => x.netId);
     }
+    let repoMap: Record<string, string> | undefined;
+    if (category === Category.PROJECT && projectKey) {
+      const assignments = await prismaClient.projectRepoAssignment.findMany({
+        where: {
+          courseId: job.courseId,
+          projectKey,
+          netId: { in: netIds },
+          releasedAt: null,
+        },
+        select: { netId: true, repoName: true },
+      });
+      repoMap = Object.fromEntries(assignments.map((a) => [a.netId, a.repoName]));
+    }
     const queueUrl = await startGradingRun({
       courseId: job.courseId,
       jenkinsPipelineName: jenkinsPipelineName || job.assignmentId,
@@ -79,6 +94,7 @@ export const startScheduledJob = async ({
       jenkinsBaseUrl,
       courseTimezone,
       jenkinsToken,
+      repoMap,
       logger,
     });
     if (queueUrl) {

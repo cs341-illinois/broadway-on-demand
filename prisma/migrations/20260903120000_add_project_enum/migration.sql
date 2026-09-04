@@ -1,0 +1,2 @@
+ALTER TYPE "Category" ADD VALUE 'PROJECT';
+ALTER TYPE "AutogradableCategory" ADD VALUE 'PROJECT';

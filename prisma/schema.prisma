@@ -31,6 +31,12 @@ model Course {
   rosterRepo         String
   firstLabDate       DateTime
 
+  // PrairieLearn integration (nullable until configured via applyGradingConfig.ts)
+  prairieLearnApiToken          String?
+  prairieLearnBaseUrl           String?
+  prairieLearnCourseInstanceId  String?
+  prairieLearnLastSyncedAt      DateTime?
+
   // Extensions config
   numExtensions     Int
   numExtensionHours Int
@@ -45,6 +51,11 @@ model Course {
   ExtensionUsageHistory ExtensionUsageHistory[]
   AttendanceRecord      AttendanceRecord[]
   PartnerGroup          PartnerGroup[]
+  GradingCategoryConfig GradingCategoryConfig[]
+  GithubUsernameMapping GithubUsernameMapping[]
+  ProjectRepoPool       ProjectRepoPool[]
+  ProjectRepoAssignment ProjectRepoAssignment[]
+  GradeAuditLog         GradeAuditLog[]
 }
 
 model Users {
@@ -66,6 +77,9 @@ model Users {
   ExtensionUsageHistory ExtensionUsageHistory[]
   AttendanceRecord      AttendanceRecord[]
   PartnerGroupMember    PartnerGroupMember[]
+  GithubUsernameMapping GithubUsernameMapping[]
+  ProjectRepoAssignment ProjectRepoAssignment[]
+  GradeAuditLog         GradeAuditLog[]
 
   @@id([netId, courseId]) // Composite primary key
   @@unique([courseId, uin])
@@ -112,11 +126,19 @@ enum Category {
   BONUS
   FINAL
   OTHER
+  PRAIRIELEARN
+  PROJECT
 }
 
 enum AutogradableCategory {
   LAB
   MP
+  PROJECT
+}
+
+enum GradingMode {
+  AUTOGRADED
+  MANUAL
 }
 
 model Assignment {
@@ -131,7 +153,11 @@ model Assignment {
   jenkinsPipelineName   String?
   quotaAmount           Int
   finalGradingRunId     String?
-  partnerRoundNumber    Int? // 1-4, LAB category only. null = this assignment doesn't use partners.
+  partnerRoundNumber    Int? // 1-4. LAB or PROJECT category only. null = this assignment doesn't use partners.
+  weight                Float   @default(0) // gradebook weight (points toward final grade)
+  prairieLearnAssessmentId String? // set for PrairieLearn-synced assignments only
+  projectKey            String? // groups the autograded + manual rows of the same logical project; PROJECT-only (CHECK enforced in DB)
+  gradingMode           GradingMode @default(MANUAL) // AUTOGRADED if Jenkins, MANUAL if staff-graded
   openAt                DateTime
   createdAt             DateTime                @default(now())
   updatedAt             DateTime                @updatedAt
@@ -141,9 +167,12 @@ model Assignment {
   Extensions            Extensions[]
   ExtensionUsageHistory ExtensionUsageHistory[]
   AttendanceRecord      AttendanceRecord[]
+  GradeAuditLog         GradeAuditLog[]
 
   @@id([courseId, id]) // Composite primary key
   @@index([courseId, visibility])
+  @@unique([courseId, prairieLearnAssessmentId])
+  @@index([courseId, category, projectKey])
 }
 
 model Job {
@@ -294,6 +323,7 @@ model PartnerGroup {
 
   Course  Course               @relation(fields: [courseId], references: [id], onDelete: Cascade)
   members PartnerGroupMember[]
+  ProjectRepoAssignment ProjectRepoAssignment[]
 
   @@index([courseId, labSection, roundNumber, archivedAt])
 }
@@ -310,4 +340,100 @@ model PartnerGroupMember {
 
   @@unique([partnerGroupId, netId])
   @@index([courseId, netId, roundNumber])
+}
+
+model GradingCategoryConfig {
+  courseId   String
+  category   Category
+  dropLowest Int      @default(0)
+
+  Course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@id([courseId, category])
+}
+
+model GithubUsernameMapping {
+  courseId       String
+  netId          String
+  githubUsername String
+  githubName     String?
+  minedAt        DateTime @default(now())
+
+  Course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  Users  Users  @relation(fields: [netId, courseId], references: [netId, courseId])
+
+  @@id([courseId, netId])
+  @@unique([courseId, githubUsername])
+}
+
+model ProjectRepoPool {
+  id         String   @id @default(cuid())
+  courseId   String
+  projectKey String
+  repoName   String
+  sortOrder  Int
+  createdAt  DateTime @default(now())
+
+  Course      Course                @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  assignments ProjectRepoAssignment[]
+
+  @@unique([courseId, projectKey, repoName])
+  @@unique([courseId, projectKey, sortOrder])
+  @@index([courseId, projectKey, sortOrder])
+}
+
+model ProjectRepoAssignment {
+  id                   String   @id @default(cuid())
+  courseId             String
+  projectKey           String
+  netId                String
+  repoName             String
+  assignedAt           DateTime @default(now())
+  assignedBy           String
+  sourcePartnerGroupId String?
+  releasedAt           DateTime?
+  releasedBy           String?
+
+  Course          Course           @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  Users           Users            @relation(fields: [netId, courseId], references: [netId, courseId], onDelete: NoAction)
+  ProjectRepoPool ProjectRepoPool  @relation(fields: [courseId, projectKey, repoName], references: [courseId, projectKey, repoName], onDelete: Restrict)
+  sourcePartnerGroup PartnerGroup? @relation(fields: [sourcePartnerGroupId], references: [id], onDelete: SetNull)
+
+  @@index([courseId, projectKey, netId])
+  @@index([courseId, projectKey, repoName])
+}
+
+model ProjectRepoAssignmentAuditLog {
+  id          String   @id @default(cuid())
+  courseId    String
+  projectKey  String
+  netId       String
+  oldRepoName String?
+  newRepoName String?
+  action      String
+  actor       String
+  at          DateTime @default(now())
+  reason      String?
+
+  @@index([courseId, projectKey, netId])
+}
+
+model GradeAuditLog {
+  id           String   @id @default(cuid())
+  courseId     String
+  assignmentId String
+  netId        String
+  oldScore     Float?
+  newScore     Float?
+  oldComments  String?
+  newComments  String?
+  changedBy    String
+  changedAt    DateTime @default(now())
+  justification String?
+
+  Course     Course     @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  Assignment Assignment @relation(fields: [courseId, assignmentId], references: [courseId, id], onDelete: Cascade)
+  Users      Users      @relation(fields: [netId, courseId], references: [netId, courseId], onDelete: NoAction)
+
+  @@index([courseId, assignmentId, netId])
 }

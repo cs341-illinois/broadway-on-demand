@@ -109,6 +109,7 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
         category,
         studentExtendable,
         partnerRoundNumber,
+        projectKey,
       } = request.body;
       try {
         await createAssignment({
@@ -124,6 +125,7 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
           category,
           studentExtendable,
           partnerRoundNumber,
+          projectKey,
         });
         reply.status(201).send();
       } catch (e) {
@@ -152,7 +154,7 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
     },
     async (request, reply) => {
       const { courseId } = request.params;
-      const { name, id, visibility, category } = request.body;
+      const { name, id, visibility, category, projectKey, gradingMode, weight } = request.body;
       try {
         await fastify.prismaClient.assignment.create({
           data: {
@@ -161,6 +163,9 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
             name,
             category,
             visibility,
+            projectKey,
+            gradingMode: gradingMode || "MANUAL",
+            weight: weight ?? 0,
             quotaAmount: 0,
             quotaPeriod: AssignmentQuota.TOTAL,
             studentExtendable: false,
@@ -235,14 +240,54 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
           githubToken: true,
         },
       });
-      const latestCommit = getLatestCommit({
-        githubToken,
-        orgName: githubOrg,
-        repoName: `${githubRepoPrefix}_${netId}`,
-        logger: request.log,
-      });
+      let repoName = `${githubRepoPrefix}_${netId}`;
+      let projectRepo:
+        | { repoName: string; repoUrl: string; accessPending: boolean }
+        | null
+        | undefined = undefined;
+      if (
+        targetAssignment.category === Category.PROJECT &&
+        targetAssignment.projectKey != null
+      ) {
+        const projectRepoAssignment =
+          await fastify.prismaClient.projectRepoAssignment.findFirst({
+            where: {
+              courseId,
+              projectKey: targetAssignment.projectKey,
+              netId,
+              releasedAt: null,
+            },
+            select: { repoName: true },
+          });
+        if (projectRepoAssignment) {
+          repoName = projectRepoAssignment.repoName;
+          projectRepo = {
+            repoName: projectRepoAssignment.repoName,
+            repoUrl: `https://github.com/${githubOrg}/${projectRepoAssignment.repoName}`,
+            accessPending: true,
+          };
+        } else {
+          projectRepo = null;
+        }
+      }
+      let latestCommit: Promise<{
+        sha: string;
+        message: string;
+        url: string;
+        date?: string;
+      } | null>;
+      if (projectRepo === null) {
+        latestCommit = Promise.resolve(null);
+      } else {
+        latestCommit = getLatestCommit({
+          githubToken,
+          orgName: githubOrg,
+          repoName,
+          logger: request.log,
+        });
+      }
 
-      const feedbackBaseUrl = `https://github.com/${githubOrg}/${githubRepoPrefix}_${netId}/tree/${feedbackBranchName}/${assignmentId}`;
+      const feedbackBaseUrl = `https://github.com/${githubOrg}/${repoName}/tree/${feedbackBranchName}/${assignmentId}`;
       const { name: assignmentName, openAt } = targetAssignment;
       const isStaff =
         courseRoles.includes(Role.ADMIN) || courseRoles.includes(Role.STAFF);
@@ -298,7 +343,7 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
         } | null;
       } | null = null;
       const partnerRoundNumber = targetAssignment.partnerRoundNumber;
-      if (targetAssignment.category === Category.LAB && partnerRoundNumber != null) {
+      if ((targetAssignment.category === Category.LAB || targetAssignment.category === Category.PROJECT) && partnerRoundNumber != null) {
         const [userRow, group] = await Promise.all([
           fastify.prismaClient.users.findUnique({
             where: { netId_courseId: { netId, courseId } },
@@ -343,6 +388,7 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
           })),
         gradingEligibility,
         latestCommit: await latestCommit,
+        projectRepo,
         partners,
       });
     },
@@ -721,114 +767,92 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
     async (request, reply) => {
       const netId = request.session.user.email.replace("@illinois.edu", "");
       const { courseId, assignmentId } = request.params;
-      const { expectedCommitHash } = request.body;
+      let { expectedCommitHash } = request.body;
       const courseRoles = getCourseRoles(courseId, request.session.user.roles);
-      const { jenkinsBaseUrl, jenkinsToken, courseTimezone } =
-        await fastify.prismaClient.course.findFirstOrThrow({
-          where: { id: courseId },
-          select: {
-            courseTimezone: true,
-            jenkinsBaseUrl: true,
-            jenkinsToken: true,
-          },
-        });
-      let { jenkinsPipelineName } =
+      const {
+        jenkinsBaseUrl,
+        jenkinsToken,
+        courseTimezone,
+        githubOrg,
+        githubToken,
+      } = await fastify.prismaClient.course.findFirstOrThrow({
+        where: { id: courseId },
+        select: {
+          courseTimezone: true,
+          jenkinsBaseUrl: true,
+          jenkinsToken: true,
+          githubOrg: true,
+          githubToken: true,
+        },
+      });
+      const assignmentRow =
         await fastify.prismaClient.assignment.findFirstOrThrow({
           where: { id: assignmentId, courseId },
           select: {
             jenkinsPipelineName: true,
+            category: true,
+            projectKey: true,
           },
         });
-      jenkinsPipelineName = jenkinsPipelineName || assignmentId;
+      let jenkinsPipelineName = assignmentRow.jenkinsPipelineName || assignmentId;
 
-      const isStaff =
-        courseRoles.includes(Role.ADMIN) || courseRoles.includes(Role.STAFF);
-      if (isStaff) {
-        await fastify.prismaClient
-          .$transaction(async (tx) => {
-            const result = await tx.job.create({
-              data: {
-                name: JobType.STUDENT_INITIATED,
-                courseId,
-                assignmentId,
-                netId: [netId],
-                type: JobType.STUDENT_INITIATED,
-                dueAt: new Date().toISOString(),
-                scheduledAt: new Date().toISOString(),
-              },
-              select: {
-                id: true,
-              },
-            });
-            const queueUrl = await startGradingRun({
+      let projectGradeLockTs: number | null = null;
+      let projectGradeLockKey: string | null = null;
+      let projectGradeLockAcquired = false;
+      let projectRepoName: string | null = null;
+      if (
+        assignmentRow.category === Category.PROJECT &&
+        assignmentRow.projectKey != null
+      ) {
+        const projectRepoAssignment =
+          await fastify.prismaClient.projectRepoAssignment.findFirst({
+            where: {
               courseId,
-              jenkinsPipelineName,
-              netIds: [netId],
-              isoTimestamp: "now",
-              jenkinsBaseUrl,
-              courseTimezone,
-              jenkinsToken,
-              type: JobType.STUDENT_INITIATED,
-              gradingRunId: result.id,
-              expectedCommitHash,
-              logger: fastify.log,
-            });
-            if (queueUrl) {
-              await tx.job.update({
-                where: { id: result.id },
-                data: { queueUrl }
-              })
-            } else {
-              request.log.error(`Could not find queue URL for job ${result.id}!`)
-            }
-
-            return result;
-          })
-          .catch((e) => {
-            if (e instanceof BaseError) {
-              throw e;
-            }
-            fastify.log.error(e);
-            throw new GradingError({
-              message: "Could not start grading job.",
-            });
+              projectKey: assignmentRow.projectKey,
+              netId,
+              releasedAt: null,
+            },
+            select: { repoName: true },
           });
-      } else {
-        // Get grading eligibility;
-        await fastify.prismaClient
-          .$transaction(
-            async (tx) => {
-              const gradingEligibility = await getGradingEligibility({
-                tx,
-                courseId,
-                netId,
-                assignmentId,
-                courseTimezone,
-              });
-              if (!gradingEligibility.eligible) {
-                throw new ValidationError({
-                  message: "User is not eligible for a grading run.",
-                });
-              }
-              if (gradingEligibility.source.type === "EXTENSION") {
-                const extensionId = gradingEligibility.source.extensionid;
-                await tx.extensionUsageHistory.create({
-                  data: {
-                    courseId,
-                    assignmentId,
-                    netId,
-                    extensionId,
-                  },
-                });
-              }
-              let { jenkinsPipelineName } =
-                await tx.assignment.findFirstOrThrow({
-                  where: { id: assignmentId, courseId },
-                  select: {
-                    jenkinsPipelineName: true,
-                  },
-                });
-              jenkinsPipelineName = jenkinsPipelineName || assignmentId;
+        if (!projectRepoAssignment) {
+          throw new ValidationError({ message: "No project repo assigned" });
+        }
+        projectRepoName = projectRepoAssignment.repoName;
+        projectGradeLockKey = `projectrepo:grade:${courseId}:${projectRepoAssignment.repoName}`;
+        projectGradeLockTs = new Date().getTime();
+        const lockResponse = await fastify.redisClient.set(
+          projectGradeLockKey,
+          projectGradeLockTs,
+          { NX: true, PX: 30000 },
+        );
+        if (!lockResponse) {
+          throw new ValidationError({
+            message:
+              "Another member of your group is currently running grading. Please wait and try again.",
+          });
+        }
+        projectGradeLockAcquired = true;
+        const serverCommit = await getLatestCommit({
+          githubToken,
+          orgName: githubOrg,
+          repoName: projectRepoAssignment.repoName,
+          logger: fastify.log,
+        });
+        if (!serverCommit) {
+          throw new ValidationError({
+            message:
+              "Could not resolve the latest commit for your project repo. Please ensure your repository has at least one commit and try again.",
+          });
+        }
+        expectedCommitHash = serverCommit.sha;
+      }
+
+      try {
+        const isStaff =
+          courseRoles.includes(Role.ADMIN) || courseRoles.includes(Role.STAFF);
+        if (isStaff) {
+          await fastify.prismaClient
+            .$transaction(async (tx) => {
               const result = await tx.job.create({
                 data: {
                   name: JobType.STUDENT_INITIATED,
@@ -854,6 +878,7 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
                 type: JobType.STUDENT_INITIATED,
                 gradingRunId: result.id,
                 expectedCommitHash,
+                repoMap: projectRepoName ? { [netId]: projectRepoName } : undefined,
                 logger: fastify.log,
               });
               if (queueUrl) {
@@ -864,19 +889,118 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
               } else {
                 request.log.error(`Could not find queue URL for job ${result.id}!`)
               }
+
               return result;
-            },
-            { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-          )
-          .catch((e) => {
-            if (e instanceof BaseError) {
-              throw e;
-            }
-            fastify.log.error(e);
-            throw new GradingError({
-              message: "Could not start grading run.",
+            })
+            .catch((e) => {
+              if (e instanceof BaseError) {
+                throw e;
+              }
+              fastify.log.error(e);
+              throw new GradingError({
+                message: "Could not start grading job.",
+              });
             });
-          });
+        } else {
+          // Get grading eligibility;
+          await fastify.prismaClient
+            .$transaction(
+              async (tx) => {
+                const gradingEligibility = await getGradingEligibility({
+                  tx,
+                  courseId,
+                  netId,
+                  assignmentId,
+                  courseTimezone,
+                });
+                if (!gradingEligibility.eligible) {
+                  throw new ValidationError({
+                    message: "User is not eligible for a grading run.",
+                  });
+                }
+                if (gradingEligibility.source.type === "EXTENSION") {
+                  const extensionId = gradingEligibility.source.extensionid;
+                  await tx.extensionUsageHistory.create({
+                    data: {
+                      courseId,
+                      assignmentId,
+                      netId,
+                      extensionId,
+                    },
+                  });
+                }
+                let { jenkinsPipelineName } =
+                  await tx.assignment.findFirstOrThrow({
+                    where: { id: assignmentId, courseId },
+                    select: {
+                      jenkinsPipelineName: true,
+                    },
+                  });
+                jenkinsPipelineName = jenkinsPipelineName || assignmentId;
+                const result = await tx.job.create({
+                  data: {
+                    name: JobType.STUDENT_INITIATED,
+                    courseId,
+                    assignmentId,
+                    netId: [netId],
+                    type: JobType.STUDENT_INITIATED,
+                    dueAt: new Date().toISOString(),
+                    scheduledAt: new Date().toISOString(),
+                  },
+                  select: {
+                    id: true,
+                  },
+                });
+                const queueUrl = await startGradingRun({
+                  courseId,
+                  jenkinsPipelineName,
+                  netIds: [netId],
+                  isoTimestamp: "now",
+                  jenkinsBaseUrl,
+                  courseTimezone,
+                  jenkinsToken,
+                  type: JobType.STUDENT_INITIATED,
+                  gradingRunId: result.id,
+                  expectedCommitHash,
+                  repoMap: projectRepoName ? { [netId]: projectRepoName } : undefined,
+                  logger: fastify.log,
+                });
+                if (queueUrl) {
+                  await tx.job.update({
+                    where: { id: result.id },
+                    data: { queueUrl }
+                  })
+                } else {
+                  request.log.error(`Could not find queue URL for job ${result.id}!`)
+                }
+                return result;
+              },
+              { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+            )
+            .catch((e) => {
+              if (e instanceof BaseError) {
+                throw e;
+              }
+              fastify.log.error(e);
+              throw new GradingError({
+                message: "Could not start grading run.",
+              });
+            });
+        }
+      } finally {
+        if (
+          projectGradeLockAcquired &&
+          projectGradeLockKey &&
+          projectGradeLockTs != null
+        ) {
+          const lockValue = await fastify.redisClient.get(projectGradeLockKey);
+          if (lockValue) {
+            const retrievedLockTs = parseInt(lockValue, 10);
+            if (projectGradeLockTs === retrievedLockTs) {
+              await fastify.redisClient.del(projectGradeLockKey);
+            }
+          }
+        }
       }
       return reply.status(201).send();
     },

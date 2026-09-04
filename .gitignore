@@ -133,3 +133,11 @@ src/generated/
 docker-compose.override.yml
 src/client/enums.ts
 .DS_Store
+cleaned_roster.csv
+roster.csv
+redact.py
+get_repo_members.py
+PROJECT_CATEGORY_PLAN.md
+mining_results.txt
+server.log
+tmp_*.ts

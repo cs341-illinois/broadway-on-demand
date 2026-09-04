@@ -19,6 +19,7 @@ export type StartGradingRunInputs = {
   jenkinsToken: string;
   logger: FastifyBaseLogger;
   expectedCommitHash?: string;
+  repoMap?: Record<string, string>;
 };
 
 const dateFormatRegex = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
@@ -40,6 +41,7 @@ export const jenkinsPayloadSchema = z.object({
   INTEGRITY_ONLY: z.optional(z.boolean()),
   JOB_PRIORITY: z.number().min(1).max(5),
   EXPECTED_COMMIT_HASH: z.string().default(""),
+  REPO_MAP: z.string().default(""),
 });
 
 export type JenkinsPayload = z.infer<typeof jenkinsPayloadSchema>;
@@ -52,6 +54,7 @@ type GetJenkinsParamsInputs = {
   gradingRunId: string;
   logger: FastifyBaseLogger;
   expectedCommitHash?: string;
+  repoMap?: Record<string, string>;
 };
 
 const getJobPriority = (jobType: JobType) => {
@@ -76,6 +79,7 @@ const getJenkinsParams = ({
   gradingRunId,
   logger,
   expectedCommitHash,
+  repoMap,
 }: GetJenkinsParamsInputs): JenkinsPayload => {
   const proposedPayload = {
     STUDENT_IDS: netIds.join(","),
@@ -93,6 +97,7 @@ const getJenkinsParams = ({
     GRADING_RUN_ID: gradingRunId,
     JOB_PRIORITY: getJobPriority(type),
     EXPECTED_COMMIT_HASH: expectedCommitHash,
+    REPO_MAP: repoMap ? JSON.stringify(repoMap) : "",
   };
   const { data, success, error } =
     jenkinsPayloadSchema.safeParse(proposedPayload);
@@ -116,6 +121,7 @@ export async function startGradingRun({
   courseTimezone,
   jenkinsToken,
   expectedCommitHash,
+  repoMap,
   logger,
 }: StartGradingRunInputs) {
   gradingRunId = gradingRunId || uuid4();
@@ -131,6 +137,7 @@ export async function startGradingRun({
     agDateTime,
     logger,
     expectedCommitHash,
+    repoMap,
   });
   const url = `${jenkinsJobUrl}?${new URLSearchParams(JSON.parse(JSON.stringify(params))).toString()}`;
   const result = await fetch(url, {

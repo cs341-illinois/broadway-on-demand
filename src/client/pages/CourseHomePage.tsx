@@ -24,6 +24,7 @@ import {
 } from "../utils";
 import AppNavbar from "../components/Navbar";
 import AssignmentModal from "../components/CreateAssignmentModal";
+import CreateProjectModal from "../components/CreateProjectModal";
 import {
   AssignmentQuotaLabels,
   CourseInformationResponse,
@@ -57,6 +58,7 @@ interface CourseContentProps {
   isStaff: boolean;
   courseRoles: string[];
   onShowAssignmentModal: () => void;
+  onShowProjectModal: () => void;
   navigate: ReturnType<typeof useNavigate>;
 }
 
@@ -66,6 +68,7 @@ function CourseContent({
   isStaff,
   courseRoles,
   onShowAssignmentModal,
+  onShowProjectModal,
   navigate,
 }: CourseContentProps) {
   const courseData = courseResource.read();
@@ -235,6 +238,34 @@ function CourseContent({
                       </Col>
                     </>
                   )}
+                  {isStaff && (
+                    <>
+                      <Col xs={12} sm={6}>
+                        <Button
+                          onClick={() =>
+                            navigate(
+                              formulateUrl(`dashboard/${courseId}/projectRepos`),
+                            )
+                          }
+                          className="w-100"
+                        >
+                          Project Repos
+                        </Button>
+                      </Col>
+                      <Col xs={12} sm={6}>
+                        <Button
+                          onClick={() =>
+                            navigate(
+                              formulateUrl(`dashboard/${courseId}/projectGrades`),
+                            )
+                          }
+                          className="w-100"
+                        >
+                          Project Grade Entry
+                        </Button>
+                      </Col>
+                    </>
+                  )}
                   {courseRoles.includes("ADMIN") && (
                     <>
                       <Col xs={12} sm={12}>
@@ -251,12 +282,21 @@ function CourseContent({
                           Manage Assignment Grades
                         </Button>
                       </Col>
-                      <Col xs={12} sm={12}>
+                      <Col xs={12} sm={6}>
                         <Button
                           onClick={onShowAssignmentModal}
                           className="w-100"
                         >
                           Add Assignment
+                        </Button>
+                      </Col>
+                      <Col xs={12} sm={6}>
+                        <Button
+                          variant="success"
+                          onClick={onShowProjectModal}
+                          className="w-100"
+                        >
+                          Create Project
                         </Button>
                       </Col>
                     </>
@@ -283,6 +323,7 @@ export default function CourseHomePage(): JSX.Element {
   const { showAlert } = useAlert();
 
   const [assignmentModal, setAssignmentModal] = useState<boolean>(false);
+  const [projectModal, setProjectModal] = useState<boolean>(false);
   const [resourceKey, setResourceKey] = useState<number>(0);
 
   const courseRoles = useMemo(() => {
@@ -337,6 +378,92 @@ export default function CourseHomePage(): JSX.Element {
     }
   };
 
+  const handleProjectSubmit = async (data: {
+    projectKey: string;
+    repoProjectName: string;
+    components: { id: string; name: string; gradingMode: string; weight: number }[];
+  }): Promise<void> => {
+    if (!courseId) {
+      showAlert("Course ID is missing.", "danger");
+      return;
+    }
+    const openAt = new Date().toISOString();
+    const dueAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
+    let created = 0;
+    const errors: string[] = [];
+    for (const comp of data.components) {
+      try {
+        if (comp.gradingMode === "AUTOGRADED") {
+          const body = {
+            id: comp.id,
+            name: `${data.projectKey}: ${comp.name}`,
+            category: "PROJECT",
+            visibility: "DEFAULT",
+            quotaPeriod: "TOTAL",
+            quotaAmount: 3,
+            openAt,
+            dueAt,
+            studentExtendable: false,
+            partnerRoundNumber: 1,
+            projectKey: data.projectKey,
+            weight: comp.weight,
+          };
+          const res = await fetch(
+            formulateUrl(`api/v1/courses/${courseId}/assignment`),
+            {
+              method: "POST",
+              body: JSON.stringify(body),
+              headers: { "Content-Type": "application/json" },
+            },
+          );
+          if (!res.ok) {
+            const errBody = await res.json().catch(() => ({}));
+            throw new Error(errBody.message || `status ${res.status}`);
+          }
+        } else {
+          const body = {
+            id: comp.id,
+            name: `${data.projectKey}: ${comp.name}`,
+            category: "PROJECT",
+            visibility: "DEFAULT",
+            projectKey: data.projectKey,
+            gradingMode: "MANUAL",
+            weight: comp.weight,
+          };
+          const res = await fetch(
+            formulateUrl(`api/v1/courses/${courseId}/assignment/manual`),
+            {
+              method: "POST",
+              body: JSON.stringify(body),
+              headers: { "Content-Type": "application/json" },
+            },
+          );
+          if (!res.ok) {
+            const errBody = await res.json().catch(() => ({}));
+            throw new Error(errBody.message || `status ${res.status}`);
+          }
+        }
+        created++;
+      } catch (e: any) {
+        errors.push(`${comp.name}: ${e.message}`);
+      }
+    }
+    if (errors.length > 0) {
+      showAlert(
+        `Created ${created}/${data.components.length} components. Errors: ${errors.join("; ")}`,
+        "warning",
+        10000,
+      );
+    } else {
+      showAlert(
+        `Project "${data.projectKey}" created with ${created} components.`,
+        "success",
+      );
+    }
+    setResourceKey((prevKey) => prevKey + 1);
+    setProjectModal(false);
+  };
+
   if (!user) {
     return <LoadingScreen message="Loading user data..." />;
   }
@@ -351,6 +478,7 @@ export default function CourseHomePage(): JSX.Element {
             isStaff={isStaff}
             courseRoles={courseRoles}
             onShowAssignmentModal={() => setAssignmentModal(true)}
+            onShowProjectModal={() => setProjectModal(true)}
             navigate={navigate}
           />
         </Suspense>
@@ -361,6 +489,14 @@ export default function CourseHomePage(): JSX.Element {
           show={assignmentModal}
           handleClose={() => setAssignmentModal(false)}
           handleSubmit={handleAssignmentSubmit}
+        />
+      )}
+
+      {courseRoles.includes("ADMIN") && projectModal && (
+        <CreateProjectModal
+          show={projectModal}
+          handleClose={() => setProjectModal(false)}
+          handleSubmit={handleProjectSubmit}
         />
       )}
     </>

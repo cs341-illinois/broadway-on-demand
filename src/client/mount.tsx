@@ -20,6 +20,9 @@ import LabAttendancePage from "./pages/LabAttendancePage";
 import { RouterErrorBoundaryWrapper } from "./components/RouterErrorBoundaryWrapper";
 import AssignmentGradesPage from "./pages/AssignmentGrades";
 import PartnersPage from "./pages/PartnersPage";
+import GradebookPage from "./pages/Gradebook";
+import ProjectReposPage from "./pages/ProjectReposPage";
+import ProjectGradeEntryPage from "./pages/ProjectGradeEntryPage";
 const router = createBrowserRouter([
   {
     path: formulateUrl("/"),
@@ -123,6 +126,33 @@ const router = createBrowserRouter([
     element: (
       <ProtectedRoute>
         <LabAttendancePage />
+      </ProtectedRoute>
+    ),
+    errorElement: <RouterErrorBoundaryWrapper />,
+  },
+  {
+    path: formulateUrl("dashboard/:courseId/gradebook"),
+    element: (
+      <ProtectedRoute>
+        <GradebookPage />
+      </ProtectedRoute>
+    ),
+    errorElement: <RouterErrorBoundaryWrapper />,
+  },
+  {
+    path: formulateUrl("dashboard/:courseId/projectRepos"),
+    element: (
+      <ProtectedRoute>
+        <ProjectReposPage />
+      </ProtectedRoute>
+    ),
+    errorElement: <RouterErrorBoundaryWrapper />,
+  },
+  {
+    path: formulateUrl("dashboard/:courseId/projectGrades"),
+    element: (
+      <ProtectedRoute>
+        <ProjectGradeEntryPage />
       </ProtectedRoute>
     ),
     errorElement: <RouterErrorBoundaryWrapper />,

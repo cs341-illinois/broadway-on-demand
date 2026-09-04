@@ -1,0 +1,63 @@
+courseId: cs341-fa26
+
+# Category point totals from the syllabus, for reference while filling in
+# assignmentWeights below:
+#
+#   FINAL                10  - Final Exam
+#   ATTENDANCE           14  - Lab Attendance (12-13 sessions)
+#   MP                   18  - System Projects (3-4 projects)
+#   LAB                  24  - Weekly Programming Assignments (12, drop lowest 1)
+#   OTHER                24  - CBTF Tests (6 tests)
+#   OTHER                 8  - Interview Clinics (4 clinics)
+#   PRAIRIELEARN          2  - HW0 (on PL)
+#                       ---
+#                       100
+#
+# NOTE: CBTF Tests and Interview Clinics both landed on OTHER below since the
+# Category enum has no separate slot for either — they currently share one
+# dropLowest setting. If they need different drop rules, this enum needs a
+# new value (e.g. CBTF) added in prisma/schema.prisma first.
+
+categories:
+  LAB:
+    dropLowest: 1 # Weekly Programming Assignments
+  MP:
+    dropLowest: 0 # System Projects
+  ATTENDANCE:
+    dropLowest: 0 # Lab Attendance
+  FINAL:
+    dropLowest: 0 # Final Exam
+  OTHER:
+    dropLowest: 0 # CBTF Tests + Interview Clinics (see note above)
+  PRAIRIELEARN:
+    dropLowest: 0 # HW0
+
+# One entry per existing Assignment.id -> weight (points). Fill in with the
+# real assignment ids once they're created (manual/Broadway assignments for
+# everything except HW0, which should come from a PrairieLearn sync).
+assignmentWeights:
+  # final-exam: 10
+  #
+  # lab1: 2
+  # lab2: 2
+  # ... (12 total, weights summing to 24)
+  #
+  # mp1: 6
+  # ... (3-4 total, weights summing to 18)
+  #
+  # attendance1: ~1.1
+  # ... (12-13 total, weights summing to 14)
+  #
+  # cbtf1: 4
+  # ... (6 total, weights summing to 24)
+  #
+  # interview1: 2
+  # ... (4 total, weights summing to 8)
+  #
+  # hw0: 2   # must match the PrairieLearn-synced assignment id (pl-<assessment id>)
+
+# Only needed once HW0 should start syncing from PrairieLearn.
+# prairieLearn:
+#   baseUrl: https://us.prairielearn.com
+#   courseInstanceId: ""
+#   apiToken: "${PL_API_TOKEN}"

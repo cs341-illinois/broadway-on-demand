@@ -36,6 +36,10 @@ import { type WebSocket } from "ws";
 import websocketRoutes from "./routes/websocket.js";
 import statsRoutes from "./routes/stats.js";
 import partnerRoutes from "./routes/partners.js";
+import gradebookRoutes from "./routes/gradebook.js";
+import projectReposRoutes from "./routes/projectRepos.js";
+import projectGradesRoutes from "./routes/projectGrades.js";
+import { reconcileAllProjectKeysWithLock } from "./functions/projectRepos.js";
 
 const SESSION_TTL = 86400 * 1000; // 1 day in seconds
 
@@ -242,6 +246,9 @@ async function start() {
       await api.register(statsRoutes, { prefix: "/stats" })
       await api.register(rosterRoutes, { prefix: "/roster" });
       await api.register(partnerRoutes, { prefix: "/partners" });
+      await api.register(gradebookRoutes, { prefix: "/gradebook" });
+      await api.register(projectReposRoutes, { prefix: "/projectRepos" });
+      await api.register(projectGradesRoutes, { prefix: "/projectGrades" });
       await api.register(extensionRoutes, { prefix: "/extension" });
       await api.register(studentInfoRoutes, { prefix: "/studentInfo" });
       await api.register(attendanceRoutes, { prefix: "/attendance" });
@@ -265,3 +272,24 @@ try {
   server.log.error(err);
   process.exit(1);
 }
+
+// Post-startup: backfill any unassigned project repo assignments.
+// Runs behind a Redis lock so only one instance does this in HA.
+// Fail-soft — logs errors but never crashes boot.
+(async () => {
+  try {
+    const courses = await server.prismaClient.course.findMany({
+      select: { id: true },
+    });
+    for (const { id: courseId } of courses) {
+      await reconcileAllProjectKeysWithLock({
+        prismaClient: server.prismaClient,
+        redisClient: server.redisClient,
+        courseId,
+        logger: server.log,
+      });
+    }
+  } catch (e) {
+    server.log.error({ err: e }, "Startup project repo reconciliation failed (fail-soft)");
+  }
+})();

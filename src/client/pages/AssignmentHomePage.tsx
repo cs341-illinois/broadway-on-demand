@@ -413,50 +413,77 @@ function AssignmentContent({
             <Card className="mt-2">
               <Card.Header as="h4">Repository Information</Card.Header>
               <Card.Body>
-                {assignmentData.latestCommit && (
+                {assignmentData.projectRepo && (
                   <>
-                    <b>Latest Commit: </b>
-                    <code>
-                      {assignmentData.latestCommit.sha.slice(0, 7)}
-                    </code>{" "}
-                    <br />
-                    <b>Commit Message: </b>
-                    <code>
-                      {assignmentData.latestCommit.message.split("\n")[0]}
-                    </code>{" "}
-                    <br />
-                    {assignmentData.latestCommit.date && (
-                      <>
-                        <b>Committed At: </b>
-                        {moment(assignmentData.latestCommit.date).format(
-                          dateTimeFormatString,
-                        )}
-                        {" ("}
-                        {moment(assignmentData.latestCommit.date).fromNow()}
-                        {")"}
-                      </>
-                    )}{" "}
+                    <b>Project Repo: </b>
                     <a
-                      href={assignmentData.latestCommit.url}
+                      href={assignmentData.projectRepo.repoUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                     >
-                      <Button
-                        variant="outline-primary"
-                        className="w-100 mt-3"
-                        disabled={!assignmentData.latestCommit}
-                      >
-                        View Commit
-                      </Button>
+                      {assignmentData.projectRepo.repoName}
                     </a>
+                    <br />
+                    {assignmentData.projectRepo.accessPending && (
+                      <p className="text-warning mt-2 mb-2">
+                        Access may be pending. If you cannot view the
+                        repository, please contact course staff.
+                      </p>
+                    )}
                   </>
                 )}
-                {!assignmentData.latestCommit && (
-                  <p className="text-muted">
-                    Repository not found, or there are no commits in your
-                    repository.
+                {assignmentData.projectRepo === null && (
+                  <p className="text-muted mb-0">
+                    No project repo assigned. Please contact your course
+                    staff.
                   </p>
                 )}
+                {assignmentData.projectRepo !== null &&
+                  assignmentData.latestCommit && (
+                    <>
+                      <b>Latest Commit: </b>
+                      <code>
+                        {assignmentData.latestCommit.sha.slice(0, 7)}
+                      </code>{" "}
+                      <br />
+                      <b>Commit Message: </b>
+                      <code>
+                        {assignmentData.latestCommit.message.split("\n")[0]}
+                      </code>{" "}
+                      <br />
+                      {assignmentData.latestCommit.date && (
+                        <>
+                          <b>Committed At: </b>
+                          {moment(assignmentData.latestCommit.date).format(
+                            dateTimeFormatString,
+                          )}
+                          {" ("}
+                          {moment(assignmentData.latestCommit.date).fromNow()}
+                          {")"}
+                        </>
+                      )}{" "}
+                      <a
+                        href={assignmentData.latestCommit.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <Button
+                          variant="outline-primary"
+                          className="w-100 mt-3"
+                        >
+                          View Commit
+                        </Button>
+                      </a>
+                    </>
+                  )}
+                {assignmentData.projectRepo !== null &&
+                  !assignmentData.latestCommit && (
+                    <p className="text-muted mt-2 mb-0">
+                      {assignmentData.projectRepo
+                        ? "No commits found in your project repository yet."
+                        : "Repository not found, or there are no commits in your repository."}
+                    </p>
+                  )}
               </Card.Body>
             </Card>
           </Col>

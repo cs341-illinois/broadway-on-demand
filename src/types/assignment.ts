@@ -9,6 +9,7 @@ import {
   Category,
   JobType,
   AutogradableCategory,
+  GradingMode,
 } from "../generated/prisma/enums.js";
 
 export const AssignmentVisibilityLabels: HumanReadableEnum<
@@ -53,6 +54,8 @@ export const CategoryLabels: HumanReadableEnum<typeof Category> = {
   OTHER: "Other",
   FINAL: "Exam",
   BONUS: "Bonus",
+  PRAIRIELEARN: "PrairieLearn",
+  PROJECT: "Project",
 };
 
 export const JobTypeLabels: HumanReadableEnum<typeof JobType> = {
@@ -77,7 +80,7 @@ export const coreAssignmentBodySchema = z.object({
     .transform((val) => (val.trim() === "" ? undefined : val.trim()))
     .optional(),
   studentExtendable: z.boolean(),
-  // LAB category only. null/undefined = no partner requirement.
+  // LAB or PROJECT category only. null/undefined = no partner requirement.
   partnerRoundNumber: z
     .number()
     .int()
@@ -85,6 +88,8 @@ export const coreAssignmentBodySchema = z.object({
     .max(PARTNER_MAX_ROUNDS)
     .nullable()
     .optional(),
+  // PROJECT-only — groups the autograded + manual rows of the same logical project.
+  projectKey: z.string().min(1).nullable().optional(),
 });
 
 function partnerRoundOnlyForLab(data: {
@@ -93,8 +98,16 @@ function partnerRoundOnlyForLab(data: {
 }) {
   return (
     data.partnerRoundNumber == null ||
-    data.category === AutogradableCategory.LAB
+    data.category === AutogradableCategory.LAB ||
+    data.category === AutogradableCategory.PROJECT
   );
+}
+
+function projectKeyOnlyForProject(data: {
+  category: AutogradableCategory;
+  projectKey?: string | null;
+}) {
+  return data.projectKey == null || data.category === AutogradableCategory.PROJECT;
 }
 
 export const createAssignmentBodySchema = coreAssignmentBodySchema
@@ -108,8 +121,12 @@ export const createAssignmentBodySchema = coreAssignmentBodySchema
     path: ["dueAt"],
   })
   .refine(partnerRoundOnlyForLab, {
-    message: "Partner round can only be set for Lab assignments.",
+    message: "Partner round can only be set for Lab or Project assignments.",
     path: ["partnerRoundNumber"],
+  })
+  .refine(projectKeyOnlyForProject, {
+    message: "Project key can only be set for Project assignments.",
+    path: ["projectKey"],
   });
 
 export const updateAssignmentBodySchema = coreAssignmentBodySchema.
@@ -122,8 +139,12 @@ export const updateAssignmentBodySchema = coreAssignmentBodySchema.
     },
   )
   .refine(partnerRoundOnlyForLab, {
-    message: "Partner round can only be set for Lab assignments.",
+    message: "Partner round can only be set for Lab or Project assignments.",
     path: ["partnerRoundNumber"],
+  })
+  .refine(projectKeyOnlyForProject, {
+    message: "Project key can only be set for Project assignments.",
+    path: ["projectKey"],
   });
 
 export type UpdateAssignmentBody = z.infer<typeof updateAssignmentBodySchema>;
@@ -132,6 +153,9 @@ export const coreManualAssignmentBodySchema = z.object({
   name: z.string().min(1, "You must specify an assignment name."),
   category: z.nativeEnum(Category),
   visibility: z.nativeEnum(AssignmentVisibility),
+  projectKey: z.string().min(1).nullable().optional(),
+  gradingMode: z.nativeEnum(GradingMode).default(GradingMode.MANUAL),
+  weight: z.number().min(0).default(0),
 });
 
 export const createManualAssignmentBodySchema =
@@ -155,6 +179,7 @@ export const assignmentsResponseEntry = z.object({
   dueAt: courseDateString,
   studentExtendable: z.boolean(),
   partnerRoundNumber: z.number().int().min(1).max(PARTNER_MAX_ROUNDS).nullable(),
+  projectKey: z.string().nullable().optional(),
 });
 
 export type AssignmentResponseEntry = z.infer<typeof assignmentsResponseEntry>;
@@ -232,6 +257,16 @@ export const assignmentResponseBody = z.object({
     }),
     z.null(),
   ]),
+  // Present only for PROJECT assignments. null = project assignment with no
+  // repo assigned; undefined = non-PROJECT assignment.
+  projectRepo: z
+    .object({
+      repoName: z.string(),
+      repoUrl: z.string().url(),
+      accessPending: z.boolean(),
+    })
+    .nullable()
+    .optional(),
   // Present only for LAB assignments tagged with a partner round.
   partners: z
     .object({

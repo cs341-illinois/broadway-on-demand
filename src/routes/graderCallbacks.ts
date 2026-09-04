@@ -218,7 +218,7 @@ const graderCallbackRoutes: FastifyPluginAsync = async (fastify, _options) => {
               });
             }
 
-            // Lab partners: on the post-deadline final run, a group's published
+            // Lab/Project partners: on the post-deadline final run, a group's published
             // grade is the max across whichever members actually have a result
             // in *this* run - not just whoever's run happened to complete last.
             if (jobData.type === JobType.FINAL_GRADING) {
@@ -227,7 +227,8 @@ const graderCallbackRoutes: FastifyPluginAsync = async (fastify, _options) => {
                 select: { category: true, partnerRoundNumber: true },
               });
               if (
-                assignment?.category === Category.LAB &&
+                (assignment?.category === Category.LAB ||
+                  assignment?.category === Category.PROJECT) &&
                 assignment.partnerRoundNumber != null
               ) {
                 const roundNumber = assignment.partnerRoundNumber;

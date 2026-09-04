@@ -37,6 +37,7 @@ type CreateAssignmentInput = {
   jenkinsPipelineName?: string;
   studentExtendable: boolean;
   partnerRoundNumber?: number | null;
+  projectKey?: string | null;
 };
 
 type DeleteAssignmentInput = {
@@ -61,6 +62,7 @@ export async function createAssignment({
   jenkinsPipelineName,
   studentExtendable,
   partnerRoundNumber,
+  projectKey,
 }: CreateAssignmentInput) {
   await client
     .$transaction(async (tx) => {
@@ -79,6 +81,8 @@ export async function createAssignment({
             jenkinsPipelineName,
             studentExtendable,
             partnerRoundNumber,
+            projectKey,
+            gradingMode: "AUTOGRADED",
           },
         })
         .catch((e) => {
@@ -137,6 +141,7 @@ export async function modifyAssignment({
   category,
   jenkinsPipelineName,
   partnerRoundNumber,
+  projectKey,
 }: CreateAssignmentInput) {
   await client.$transaction(async (tx) => {
     const jobRepo = new PrismaJobRepository(tx);
@@ -157,6 +162,7 @@ export async function modifyAssignment({
           category,
           jenkinsPipelineName,
           partnerRoundNumber,
+          projectKey,
         },
         select: {
           finalGradingRunId: true,
@@ -362,7 +368,7 @@ export async function getGradingEligibility({
         select: { courseTimezone: true },
       })
     ).courseTimezone;
-  const { quotaPeriod, quotaAmount, visibility, openAt: openAtDate } =
+  const { quotaPeriod, quotaAmount, visibility, openAt: openAtDate, category, projectKey } =
     await tx.assignment.findFirstOrThrow({
       where: {
         courseId,
@@ -373,6 +379,8 @@ export async function getGradingEligibility({
         quotaPeriod: true,
         visibility: true,
         openAt: true,
+        category: true,
+        projectKey: true,
       },
     });
   const openAt = moment(openAtDate);
@@ -381,6 +389,20 @@ export async function getGradingEligibility({
     visibility === AssignmentVisibility.INVISIBLE_FORCE_CLOSE
   ) {
     return { eligible: false };
+  }
+  if (category === Category.PROJECT && projectKey != null) {
+    const projectRepoAssignment = await tx.projectRepoAssignment.findFirst({
+      where: {
+        courseId,
+        projectKey,
+        netId,
+        releasedAt: null,
+      },
+      select: { id: true },
+    });
+    if (!projectRepoAssignment) {
+      return { eligible: false };
+    }
   }
 
   const assignmentDueDatePromise = getAssignmentDueDate({
@@ -492,7 +514,7 @@ export async function getAutogradableAssignments({
         }),
       ...(showUnextendable ? {} : { studentExtendable: true }),
       category: {
-        in: [AutogradableCategory.LAB, AutogradableCategory.MP],
+        in: [AutogradableCategory.LAB, AutogradableCategory.MP, AutogradableCategory.PROJECT],
       },
     },
     orderBy: {
