@@ -24,6 +24,7 @@ const garbageRepoEntry = z.object({
   repoName: z.string().min(1),
   assignedNetIds: z.array(z.string()),
   reason: z.string(),
+  reclaimable: z.boolean(),
 });
 
 const conflictEntry = z.object({
@@ -46,6 +47,7 @@ const assignmentEntry = z.object({
   repoName: z.string().min(1),
   partnerGroupId: z.string().nullable(),
   assignedAt: z.string(),
+  githubAccessConfirmed: z.boolean(),
 });
 
 const projectReposStatusResponse = z.object({
@@ -152,6 +154,7 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
             sourcePartnerGroupId: true,
             assignedAt: true,
             releasedAt: true,
+            githubAccessConfirmed: true,
           },
         }),
         fastify.prismaClient.partnerGroup.findMany({
@@ -224,6 +227,7 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
             repoName,
             assignedNetIds: repoAssignments.map((a) => a.netId),
             reason: "all assignments released (reclaimable)",
+            reclaimable: true,
           });
           continue;
         }
@@ -258,6 +262,7 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
             repoName,
             assignedNetIds: repoAssignments.map((a) => a.netId),
             reason: reasons.join("; ") || "no active group members",
+            reclaimable: false,
           });
         }
       }
@@ -294,6 +299,7 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
           repoName: a.repoName,
           partnerGroupId: a.sourcePartnerGroupId ?? null,
           assignedAt: a.assignedAt.toISOString(),
+          githubAccessConfirmed: a.githubAccessConfirmed,
         }))
         .sort(
           (a, b) =>

@@ -44,6 +44,7 @@ interface GarbageRepo {
   repoName: string;
   assignedNetIds: string[];
   reason: string;
+  reclaimable: boolean;
 }
 
 interface ConflictMember {
@@ -66,6 +67,7 @@ interface AssignmentRow {
   repoName: string;
   partnerGroupId: string | null;
   assignedAt: string;
+  githubAccessConfirmed: boolean;
 }
 
 interface ProjectReposStatus {
@@ -124,6 +126,8 @@ function ProjectReposContent({
 
   const [releaseTarget, setReleaseTarget] = useState<string | null>(null);
   const [isReleasing, setIsReleasing] = useState(false);
+  const [reclaimTarget, setReclaimTarget] = useState<string | null>(null);
+  const [isReclaiming, setIsReclaiming] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isReconciling, setIsReconciling] = useState(false);
   const [showReconcileConfirm, setShowReconcileConfirm] = useState(false);
@@ -194,6 +198,28 @@ function ProjectReposContent({
       showAlert((error as Error).message || "Failed to release repo.", "danger");
     } finally {
       setIsReleasing(false);
+    }
+  };
+
+  const handleReclaim = async () => {
+    if (!reclaimTarget || !selectedProjectKey) return;
+    setIsReclaiming(true);
+    try {
+      const result = await fetchJson<{ released: number; warning: string }>(
+        `api/v1/projectRepos/${courseId}/${selectedProjectKey}/reclaim`,
+        { method: "POST", body: JSON.stringify({ repoName: reclaimTarget }) },
+      );
+      showAlert(
+        `Reclaimed ${result.released} assignment(s) for ${reclaimTarget}. ${result.warning}`,
+        "warning",
+        8000,
+      );
+      setReclaimTarget(null);
+      refresh();
+    } catch (error) {
+      showAlert((error as Error).message || "Failed to reclaim repo.", "danger");
+    } finally {
+      setIsReclaiming(false);
     }
   };
 
@@ -455,13 +481,23 @@ function ProjectReposContent({
                                   </td>
                                   {isAdmin && (
                                     <td>
-                                      <Button
-                                        variant="outline-danger"
-                                        size="sm"
-                                        onClick={() => setReleaseTarget(r.repoName)}
-                                      >
-                                        Release
-                                      </Button>
+                                      {r.reclaimable ? (
+                                        <Button
+                                          variant="outline-success"
+                                          size="sm"
+                                          onClick={() => setReclaimTarget(r.repoName)}
+                                        >
+                                          Reclaim
+                                        </Button>
+                                      ) : (
+                                        <Button
+                                          variant="outline-danger"
+                                          size="sm"
+                                          onClick={() => setReleaseTarget(r.repoName)}
+                                        >
+                                          Release
+                                        </Button>
+                                      )}
                                     </td>
                                   )}
                                 </tr>
@@ -585,9 +621,13 @@ function ProjectReposContent({
                                   <td>{a.partnerGroupId ?? "—"}</td>
                                   <td>{new Date(a.assignedAt).toLocaleString()}</td>
                                   <td>
-                                    <Badge bg="warning" text="dark">
-                                      Access may be pending
-                                    </Badge>
+                                    {a.githubAccessConfirmed ? (
+                                      <Badge bg="success">Access confirmed</Badge>
+                                    ) : (
+                                      <Badge bg="warning" text="dark">
+                                        Access may be pending
+                                      </Badge>
+                                    )}
                                   </td>
                                 </tr>
                               ))}
@@ -618,6 +658,24 @@ function ProjectReposContent({
           isProcessing={isReleasing}
           onConfirm={handleRelease}
           onCancel={() => setReleaseTarget(null)}
+        />
+
+        <ConfirmationModal
+          show={reclaimTarget !== null}
+          title={`Reclaim ${reclaimTarget ?? ""}`}
+          message={
+            <>
+              This permanently deletes the released assignment rows for this
+              repo and returns it to the free pool. The audit trail is
+              preserved. Broadway cannot verify or wipe the repo's actual
+              GitHub content — remove collaborators from GitHub manually if
+              needed.
+            </>
+          }
+          confirmText="Reclaim"
+          isProcessing={isReclaiming}
+          onConfirm={handleReclaim}
+          onCancel={() => setReclaimTarget(null)}
         />
 
         <ConfirmationModal
