@@ -267,6 +267,18 @@ export const assignmentResponseBody = z.object({
     })
     .nullable()
     .optional(),
+  // All previously-assigned (released) project repos for this student in the
+  // course, across all project keys. Lets students find old group repos.
+  previousProjectRepos: z
+    .array(
+      z.object({
+        repoName: z.string(),
+        repoUrl: z.string().url(),
+        accessPending: z.boolean(),
+        projectKey: z.string(),
+      }),
+    )
+    .default([]),
   // Present only for LAB assignments tagged with a partner round.
   partners: z
     .object({

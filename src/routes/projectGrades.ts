@@ -533,6 +533,83 @@ const projectGradesRoutes: FastifyPluginAsync = async (fastify, _options) => {
       return reply.status(201).send();
     },
   );
+
+  fastify.withTypeProvider<FastifyZodOpenApiTypeProvider>().patch(
+    "/:courseId/:projectKey/weights",
+    {
+      onRequest: async (request, reply) => {
+        await fastify.authorize(request, reply, request.params.courseId, [
+          Role.ADMIN,
+        ]);
+      },
+      schema: {
+        params: projectKeyParamsSchema,
+        body: z.object({
+          components: z.array(
+            z.object({
+              assignmentId: z.string().min(1),
+              weight: z.number().min(0),
+            }),
+          ),
+        }),
+        response: {
+          200: z.null(),
+        },
+      },
+    },
+    async (request, reply) => {
+      const { courseId, projectKey } = request.params;
+      const { components } = request.body;
+
+      const total = components.reduce((sum, c) => sum + c.weight, 0);
+      if (Math.abs(total - 100) > 0.001) {
+        throw new ValidationError({
+          message: `Weights must sum to 100 (currently ${total}).`,
+        });
+      }
+
+      const existing = await fastify.prismaClient.assignment
+        .findMany({
+          where: { courseId, projectKey },
+          select: { id: true },
+        })
+        .catch((e) => {
+          request.log.error(e);
+          throw new DatabaseFetchError({
+            message: "Failed to fetch project components.",
+          });
+        });
+      const existingIds = new Set(existing.map((a) => a.id));
+      for (const c of components) {
+        if (!existingIds.has(c.assignmentId)) {
+          throw new ValidationError({
+            message: `Assignment ${c.assignmentId} does not belong to project ${projectKey}.`,
+          });
+        }
+      }
+
+      await fastify.prismaClient
+        .$transaction(
+          components.map((c) =>
+            fastify.prismaClient.assignment.update({
+              where: { courseId_id: { courseId, id: c.assignmentId } },
+              data: { weight: c.weight },
+            }),
+          ),
+        )
+        .catch((e) => {
+          if (e instanceof BaseError) {
+            throw e;
+          }
+          request.log.error(e);
+          throw new DatabaseInsertError({
+            message: "Failed to update project weights.",
+          });
+        });
+
+      return reply.status(200).send();
+    },
+  );
 };
 
 export default projectGradesRoutes;

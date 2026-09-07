@@ -270,6 +270,27 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
           projectRepo = null;
         }
       }
+      const previousRepoAssignments =
+        await fastify.prismaClient.projectRepoAssignment.findMany({
+          where: {
+            courseId,
+            netId,
+            releasedAt: { not: null },
+          },
+          select: {
+            repoName: true,
+            githubAccessConfirmed: true,
+            projectKey: true,
+            releasedAt: true,
+          },
+          orderBy: { releasedAt: "desc" },
+        });
+      const previousProjectRepos = previousRepoAssignments.map((r) => ({
+        repoName: r.repoName,
+        repoUrl: `https://github.com/${githubOrg}/${r.repoName}`,
+        accessPending: !r.githubAccessConfirmed,
+        projectKey: r.projectKey,
+      }));
       let latestCommit: Promise<{
         sha: string;
         message: string;
@@ -389,6 +410,7 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
         gradingEligibility,
         latestCommit: await latestCommit,
         projectRepo,
+        previousProjectRepos,
         partners,
       });
     },

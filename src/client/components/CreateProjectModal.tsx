@@ -1,11 +1,18 @@
 import { useState } from "react";
-import { Modal, Button, Form, Badge, Table } from "react-bootstrap";
+import { Modal, Button, Form, Table } from "react-bootstrap";
 
 interface ProjectComponent {
   id: string;
   name: string;
   gradingMode: "AUTOGRADED" | "MANUAL";
   weight: number;
+}
+
+interface ComponentDraft {
+  id: string;
+  name: string;
+  gradingMode: "AUTOGRADED" | "MANUAL";
+  weight: string;
 }
 
 interface CreateProjectModalProps {
@@ -30,21 +37,15 @@ export default function CreateProjectModal({
   const [projectKey, setProjectKey] = useState("");
   const [repoProjectName, setRepoProjectName] = useState("");
   const [repoCount, setRepoCount] = useState(200);
-  const [components, setComponents] = useState<ProjectComponent[]>([
-    { id: `c${++componentCounter}`, name: "", gradingMode: "AUTOGRADED", weight: 0 },
+  const [components, setComponents] = useState<ComponentDraft[]>([
+    { id: `c${++componentCounter}`, name: "", gradingMode: "AUTOGRADED", weight: "" },
   ]);
   const [error, setError] = useState<string | null>(null);
-
-  const totalWeight = components.reduce((sum, c) => sum + (c.weight || 0), 0);
-
-  const repoPreview = repoProjectName
-    ? `{prefix}_.${repoProjectName}_.team-001 … team-${String(repoCount).padStart(3, "0")}`
-    : "Enter a repo project name to preview";
 
   const addComponent = () => {
     setComponents([
       ...components,
-      { id: `c${++componentCounter}`, name: "", gradingMode: "MANUAL", weight: 0 },
+      { id: `c${++componentCounter}`, name: "", gradingMode: "MANUAL", weight: "" },
     ]);
   };
 
@@ -53,7 +54,11 @@ export default function CreateProjectModal({
     setComponents(components.filter((c) => c.id !== id));
   };
 
-  const updateComponent = (id: string, field: keyof ProjectComponent, value: string | number) => {
+  const updateComponent = (
+    id: string,
+    field: keyof ComponentDraft,
+    value: string,
+  ) => {
     setComponents(
       components.map((c) => (c.id === id ? { ...c, [field]: value } : c)),
     );
@@ -64,7 +69,7 @@ export default function CreateProjectModal({
     setRepoProjectName("");
     setRepoCount(200);
     setComponents([
-      { id: `c${++componentCounter}`, name: "", gradingMode: "AUTOGRADED", weight: 0 },
+      { id: `c${++componentCounter}`, name: "", gradingMode: "AUTOGRADED", weight: "" },
     ]);
     setError(null);
   };
@@ -87,17 +92,21 @@ export default function CreateProjectModal({
       setError("Repo project name must contain only letters, numbers, hyphens, and underscores.");
       return;
     }
+    const parsedWeights: number[] = [];
     for (const c of components) {
       if (!c.name.trim()) {
         setError("Every component must have a name.");
         return;
       }
-      if (c.weight < 0) {
-        setError("Weights must be non-negative.");
+      const w = c.weight === "" ? NaN : Number(c.weight);
+      if (Number.isNaN(w) || w < 0) {
+        setError("Weights must be non-negative numbers.");
         return;
       }
+      parsedWeights.push(w);
     }
-    if (totalWeight !== 100) {
+    const totalWeight = parsedWeights.reduce((sum, w) => sum + w, 0);
+    if (Math.abs(totalWeight - 100) > 0.001) {
       setError(`Weights must sum to 100 (currently ${totalWeight}).`);
       return;
     }
@@ -110,9 +119,10 @@ export default function CreateProjectModal({
       await handleSubmit({
         projectKey: projectKey.trim(),
         repoProjectName: repoProjectName.trim(),
-        components: components.map((c) => ({
+        components: components.map((c, i) => ({
           ...c,
           name: c.name.trim(),
+          weight: parsedWeights[i],
           id: `${projectKey.trim()}-${c.name.trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "")}`,
         })),
       });
@@ -158,12 +168,7 @@ export default function CreateProjectModal({
           </Form.Text>
         </Form.Group>
 
-        <div className="d-flex justify-content-between align-items-center mb-2">
-          <h5 className="mb-0">Components</h5>
-          <Badge bg={totalWeight === 100 ? "success" : "warning"}>
-            Total weight: {totalWeight}%
-          </Badge>
-        </div>
+        <h5 className="mb-2">Components</h5>
 
         <Table bordered size="sm" className="mb-2">
           <thead>
@@ -205,7 +210,7 @@ export default function CreateProjectModal({
                     max={100}
                     value={c.weight}
                     onChange={(e) =>
-                      updateComponent(c.id, "weight", Number(e.target.value))
+                      updateComponent(c.id, "weight", e.target.value)
                     }
                     disabled={disabled}
                   />

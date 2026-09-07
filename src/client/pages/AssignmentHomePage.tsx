@@ -484,6 +484,37 @@ function AssignmentContent({
                         : "Repository not found, or there are no commits in your repository."}
                     </p>
                   )}
+                {assignmentData.previousProjectRepos &&
+                  assignmentData.previousProjectRepos.length > 0 && (
+                    <>
+                      <hr />
+                      <h5 className="mb-2">Previous Repositories</h5>
+                      <p className="text-warning small mb-2">
+                        These are old groups you were in and may have old code
+                        you pushed to them. You should migrate all of it to your
+                        newest repo.
+                      </p>
+                      <ul className="mb-0">
+                        {assignmentData.previousProjectRepos.map((repo) => (
+                          <li key={repo.repoName} className="mb-1">
+                            <a
+                              href={repo.repoUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              {repo.repoName}
+                            </a>{" "}
+                            <Badge bg="secondary">{repo.projectKey}</Badge>
+                            {repo.accessPending && (
+                              <Badge bg="warning" text="dark" className="ms-1">
+                                access pending
+                              </Badge>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
               </Card.Body>
             </Card>
           </Col>

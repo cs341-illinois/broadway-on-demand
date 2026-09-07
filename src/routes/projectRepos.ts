@@ -432,32 +432,6 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
           });
         }
 
-        // Defense-in-depth: refuse if any released netId is enabled and in an active group.
-        const activeRound1Groups = await tx.partnerGroup.findMany({
-          where: { courseId, roundNumber: 1, archivedAt: null },
-          select: { members: { select: { netId: true } } },
-        });
-        const activeGroupNetIds = new Set<string>();
-        for (const g of activeRound1Groups) {
-          for (const m of g.members) activeGroupNetIds.add(m.netId);
-        }
-        const enabledUsers = await tx.users.findMany({
-          where: {
-            courseId,
-            netId: { in: released.map((a) => a.netId) },
-            enabled: true,
-          },
-          select: { netId: true },
-        });
-        const blocking = enabledUsers
-          .map((u) => u.netId)
-          .filter((n) => activeGroupNetIds.has(n));
-        if (blocking.length > 0) {
-          throw new ConflictError({
-            message: `Cannot reclaim ${repoName}: ${blocking.join(", ")} are enabled and in an active Round-1 group. Release first.`,
-          });
-        }
-
         const netIds = released.map((a) => a.netId);
 
         // Hard-delete released rows; audit log preserves history, repo re-enters the free pool.

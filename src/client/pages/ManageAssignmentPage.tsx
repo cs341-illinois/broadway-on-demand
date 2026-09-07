@@ -42,6 +42,7 @@ import { ErrorBoundary } from "../components/ErrorBoundary";
 import { LoadingScreen } from "../components/Loading";
 import ExtensionModal from "../components/CreateExtensionModal";
 import AssignmentModal from "../components/CreateAssignmentModal";
+import EditProjectWeightsModal from "../components/EditProjectWeightsModal";
 import JobLogModal from "../components/JobLogModal"; // Import the new modal component
 
 import {
@@ -53,7 +54,7 @@ import {
   JobTypeLabels,
   UpdateAssignmentBody,
 } from "../../types/assignment";
-import { AutogradableCategory, ExtensionInitiator, JobType, Role } from "../enums";
+import { AutogradableCategory, Category, ExtensionInitiator, JobType, Role } from "../enums";
 import moment from "moment-timezone";
 import pluralize from "pluralize";
 import { AssignmentExtensionsGetResponse } from "../../types/extension";
@@ -313,6 +314,7 @@ function ManageAssignmentContent({
 
   const [extensionModalOpen, setExtensionModalOpen] = useState(false);
   const [assignmentModalOpen, setAssignmentModalOpen] = useState(false);
+  const [gradeBreakdownModalOpen, setGradeBreakdownModalOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteExtensionInfo, setDeleteExtensionInfo] = useState<
     false | { id: string; netId: string }
@@ -701,6 +703,16 @@ function ManageAssignmentContent({
                     >
                       Modify Assignment
                     </Button>
+                    {isAdmin &&
+                      assignmentDetails.category === Category.PROJECT &&
+                      assignmentDetails.projectKey && (
+                        <Button
+                          onClick={() => setGradeBreakdownModalOpen(true)}
+                          disabled={isProcessing}
+                        >
+                          Edit Grade Breakdown
+                        </Button>
+                      )}
                     {isAdmin && (
                       <Button
                         onClick={() => setExtensionModalOpen(true)}
@@ -821,6 +833,16 @@ function ManageAssignmentContent({
         logContent={currentJobLog}
         runId={selectedRunIdForModal}
       />
+      {assignmentDetails.category === Category.PROJECT &&
+        assignmentDetails.projectKey && (
+          <EditProjectWeightsModal
+            show={gradeBreakdownModalOpen}
+            handleClose={() => setGradeBreakdownModalOpen(false)}
+            courseId={courseId}
+            projectKey={assignmentDetails.projectKey}
+            onSuccess={() => setResourceKey((k) => k + 1)}
+          />
+        )}
     </>
   );
 }
