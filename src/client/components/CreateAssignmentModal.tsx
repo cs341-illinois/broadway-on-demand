@@ -144,7 +144,10 @@ export default function AssignmentModal(props: AssignmentModalProps) {
   }, [idWatch, setValue]);
 
   useEffect(() => {
-    if (categoryValue !== AutogradableCategory.LAB) {
+    if (
+      categoryValue !== AutogradableCategory.LAB &&
+      categoryValue !== AutogradableCategory.PROJECT
+    ) {
       setValue("partnerRoundNumber", null);
     }
   }, [categoryValue, setValue]);
@@ -184,7 +187,8 @@ export default function AssignmentModal(props: AssignmentModalProps) {
             </Form.Select>
           </Form.Group>
 
-          {categoryValue === AutogradableCategory.LAB && (
+          {(categoryValue === AutogradableCategory.LAB ||
+            categoryValue === AutogradableCategory.PROJECT) && (
             <Form.Group className="mb-3">
               <Form.Label>Partner Round</Form.Label>
               <Form.Select

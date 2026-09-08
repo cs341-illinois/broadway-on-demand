@@ -12,9 +12,6 @@ import {
   ValidationError,
 } from "../errors/index.js";
 
-// Fall back to round 1 when partnerRoundNumber is unset on a PROJECT assignment.
-const PROJECT_ROUND_FALLBACK = 1;
-
 const projectComponentSchema = z.object({
   assignmentId: z.string(),
   name: z.string(),
@@ -164,8 +161,13 @@ const projectGradesRoutes: FastifyPluginAsync = async (fastify, _options) => {
           });
         });
 
-      const roundNumber =
-        components[0]?.partnerRoundNumber ?? PROJECT_ROUND_FALLBACK;
+      const roundNumber = components[0]?.partnerRoundNumber ?? null;
+      if (roundNumber == null) {
+        throw new ValidationError({
+          message:
+            "This project has no partner round configured. Set a Partner Round on the assignment before entering grades.",
+        });
+      }
 
       const courseRoles = getCourseRoles(courseId, request.session.user!.roles);
       const isAdmin = courseRoles.includes(Role.ADMIN);
@@ -391,7 +393,13 @@ const projectGradesRoutes: FastifyPluginAsync = async (fastify, _options) => {
             "Grades can only be entered for manually-graded assignments.",
         });
       }
-      const roundNumber = assignment.partnerRoundNumber ?? PROJECT_ROUND_FALLBACK;
+      const roundNumber = assignment.partnerRoundNumber;
+      if (roundNumber == null) {
+        throw new ValidationError({
+          message:
+            "This assignment has no partner round configured. Set a Partner Round before entering grades.",
+        });
+      }
 
       let staffLabSection: string | null = null;
       if (!isFreshAdmin) {

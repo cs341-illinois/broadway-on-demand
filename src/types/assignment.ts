@@ -279,7 +279,7 @@ export const assignmentResponseBody = z.object({
       }),
     )
     .default([]),
-  // Present only for LAB assignments tagged with a partner round.
+  // Present only for LAB or PROJECT assignments tagged with a partner round.
   partners: z
     .object({
       labSection: z.string().nullable(),

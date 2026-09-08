@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Modal, Button, Form, Table } from "react-bootstrap";
+import { PARTNER_MAX_ROUNDS } from "../../constants";
 
 interface ProjectComponent {
   id: string;
@@ -21,6 +22,7 @@ interface CreateProjectModalProps {
   handleSubmit: (data: {
     projectKey: string;
     repoProjectName: string;
+    partnerRoundNumber: number;
     components: ProjectComponent[];
   }) => Promise<void>;
   disabled?: boolean;
@@ -36,6 +38,7 @@ export default function CreateProjectModal({
 }: CreateProjectModalProps) {
   const [projectKey, setProjectKey] = useState("");
   const [repoProjectName, setRepoProjectName] = useState("");
+  const [partnerRoundNumber, setPartnerRoundNumber] = useState(1);
   const [repoCount, setRepoCount] = useState(200);
   const [components, setComponents] = useState<ComponentDraft[]>([
     { id: `c${++componentCounter}`, name: "", gradingMode: "AUTOGRADED", weight: "" },
@@ -67,6 +70,7 @@ export default function CreateProjectModal({
   const reset = () => {
     setProjectKey("");
     setRepoProjectName("");
+    setPartnerRoundNumber(1);
     setRepoCount(200);
     setComponents([
       { id: `c${++componentCounter}`, name: "", gradingMode: "AUTOGRADED", weight: "" },
@@ -119,6 +123,7 @@ export default function CreateProjectModal({
       await handleSubmit({
         projectKey: projectKey.trim(),
         repoProjectName: repoProjectName.trim(),
+        partnerRoundNumber,
         components: components.map((c, i) => ({
           ...c,
           name: c.name.trim(),
@@ -165,6 +170,28 @@ export default function CreateProjectModal({
           <Form.Text className="text-muted">
             Used in repo names: <code>{`{prefix}_.${repoProjectName || "project-1"}_.team-001`}</code>.
             After creating, run: <code>{`npx tsx src/scripts/importProjectRepoPool.ts <courseId> ${projectKey || "project1"} ${repoProjectName || "project-01"} ${repoCount}`}</code>
+          </Form.Text>
+        </Form.Group>
+
+        <Form.Group className="mb-3">
+          <Form.Label>Partner Round</Form.Label>
+          <Form.Select
+            value={partnerRoundNumber}
+            onChange={(e) => setPartnerRoundNumber(Number(e.target.value))}
+            disabled={disabled}
+          >
+            {Array.from({ length: PARTNER_MAX_ROUNDS }, (_, i) => i + 1).map(
+              (round) => (
+                <option key={round} value={round}>
+                  Round {round}
+                </option>
+              ),
+            )}
+          </Form.Select>
+          <Form.Text className="text-muted">
+            Students see their Round-N partner on every component of this
+            project, and post-deadline runs are graded as the max across the
+            group.
           </Form.Text>
         </Form.Group>
 

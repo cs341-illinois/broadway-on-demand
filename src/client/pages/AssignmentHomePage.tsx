@@ -308,7 +308,7 @@ function AssignmentContent({
             {assignmentData.partners && (
               <Card className="mb-3">
                 <Card.Header as="h4">
-                  Lab Partners (Round {assignmentData.partners.roundNumber})
+                  Partners (Round {assignmentData.partners.roundNumber})
                 </Card.Header>
                 <Card.Body>
                   {assignmentData.partners.labSection ? (

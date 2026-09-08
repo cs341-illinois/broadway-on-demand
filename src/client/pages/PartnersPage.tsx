@@ -358,7 +358,7 @@ function PartnersContent({
   const breadcrumb = {
     items: [
       { label: "Course Home", href: formulateUrl(`dashboard/${courseId}`) },
-      { label: "Lab Partners" },
+      { label: "Partners" },
     ],
   };
 
@@ -368,10 +368,10 @@ function PartnersContent({
       <Container className="p-3 mb-5 flex-grow-1">
         <Row className="mb-3 align-items-center">
           <Col>
-            <h1>Lab Partners</h1>
+            <h1>Partners</h1>
             <p className="text-muted mb-0">
-              Rounds are generated on demand - tag a Lab assignment with a
-              round to have it use these pairings.
+              Rounds are generated on demand - tag a Lab or Project assignment
+              with a round to have it use these pairings.
             </p>
           </Col>
         </Row>
@@ -586,7 +586,7 @@ function StudentPartnersContent({
   const breadcrumb = {
     items: [
       { label: "Course Home", href: formulateUrl(`dashboard/${courseId}`) },
-      { label: "Lab Partners" },
+      { label: "Partners" },
     ],
   };
 
@@ -594,7 +594,7 @@ function StudentPartnersContent({
     <>
       <AppNavbar title={courseDetails.name} breadcrumb={breadcrumb} />
       <Container className="p-3 mb-5 flex-grow-1">
-        <h1>My Lab Partners</h1>
+        <h1>My Partners</h1>
         {me.labSection ? (
           <p className="text-muted">
             Lab section: <Badge bg="secondary">{me.labSection}</Badge>
@@ -667,7 +667,7 @@ export default function PartnersPage(): JSX.Element {
     }
     const courseInfo = getCourseInfo(user, courseId)!;
     setCourseInfoSessionStorage(courseInfo);
-    document.title = `Lab Partners | ${courseInfo.courseName}`;
+    document.title = `Partners | ${courseInfo.courseName}`;
   }, [courseId, user, courseRoles, navigate, showAlert]);
 
   const staffResource = useMemo<Resource<PartnersPageData>>(() => {

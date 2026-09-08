@@ -193,7 +193,7 @@ function CourseContent({
                         navigate(formulateUrl(`dashboard/${courseId}/partners`))
                       }
                     >
-                      {isStaff ? "Manage Lab Partners" : "My Lab Partner(s)"}
+                      {isStaff ? "Manage Partners" : "My Partner(s)"}
                     </Button>
                   </Col>
                   {isStaff && (
@@ -381,6 +381,7 @@ export default function CourseHomePage(): JSX.Element {
   const handleProjectSubmit = async (data: {
     projectKey: string;
     repoProjectName: string;
+    partnerRoundNumber: number;
     components: { id: string; name: string; gradingMode: string; weight: number }[];
   }): Promise<void> => {
     if (!courseId) {
@@ -404,7 +405,7 @@ export default function CourseHomePage(): JSX.Element {
             openAt,
             dueAt,
             studentExtendable: false,
-            partnerRoundNumber: 1,
+            partnerRoundNumber: data.partnerRoundNumber,
             projectKey: data.projectKey,
             weight: comp.weight,
           };
