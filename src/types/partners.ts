@@ -42,7 +42,7 @@ export type PartnersForRoundResponse = z.infer<typeof partnersForRoundResponse>;
 // partial add/remove/move patch.
 export const putSectionGroupsBodySchema = z.object({
   groups: z
-    .array(z.array(netIdSchema).min(2, "A group needs at least 2 members."))
+    .array(z.array(netIdSchema).min(1, "A group needs at least 1 member."))
     .min(1, "You must specify at least one group."),
 });
 

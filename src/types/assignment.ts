@@ -18,7 +18,7 @@ export const AssignmentVisibilityLabels: HumanReadableEnum<
   DEFAULT: "Default (Show at Open)",
   FORCE_CLOSE: "Closed",
   FORCE_OPEN: "Open",
-  INVISIBLE_FORCE_CLOSE: "Invisble (Closed)",
+  INVISIBLE_FORCE_CLOSE: "Invisible (Closed)",
 };
 
 export const JobStatusLabels: HumanReadableEnum<typeof JobStatus> = {

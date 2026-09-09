@@ -241,6 +241,13 @@ function PartnersContent({
       showAlert("You must specify at least one group.", "warning");
       return;
     }
+    const soloNetIds = groups.filter((g) => g.length < 2).flat();  
+    if (soloNetIds.length > 0) {                                    
+      showAlert(
+        `${soloNetIds.join(", ")} will be in a group of 1 and graded individually, not combined with a partner. Confirm that this was specifically requested and approved!`,
+        "warning",
+      );
+    }
     const hasExisting = (bySection.get(editingSection) ?? []).length > 0;
     setIsSaving(true);
     try {
@@ -526,7 +533,7 @@ function PartnersContent({
           </Modal.Header>
           <Modal.Body>
             <p className="text-muted">
-              One group per line, netIds separated by commas (2-3 per group).
+              One group per line, netIds separated by commas (2-3 per group, unless 1 specifically requested and approved).
               This replaces every active group in this section for Round {roundNumber}.
             </p>
             <Form.Control
