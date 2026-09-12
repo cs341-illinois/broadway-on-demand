@@ -308,7 +308,13 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
         });
       }
 
-      const feedbackBaseUrl = `https://github.com/${githubOrg}/${repoName}/tree/${feedbackBranchName}/${assignmentId}`;
+      const { jenkinsPipelineName } = await fastify.prismaClient.assignment.findFirstOrThrow({
+        where: { courseId, id: assignmentId },
+        select: { jenkinsPipelineName: true },
+      });
+
+      const feedbackFolderName = jenkinsPipelineName || assignmentId;
+      const feedbackBaseUrl = `https://github.com/${githubOrg}/${repoName}/tree/${feedbackBranchName}/${feedbackFolderName}`;
       const { name: assignmentName, openAt } = targetAssignment;
       const isStaff =
         courseRoles.includes(Role.ADMIN) || courseRoles.includes(Role.STAFF);
