@@ -166,7 +166,12 @@ export async function reconcileProjectRepoAssignments({
     const groupNetIdSet = new Set(memberNetIds);
 
     const assignments = await tx.projectRepoAssignment.findMany({
-      where: { courseId, projectKey, netId: { in: memberNetIds }, releasedAt: null },
+      where: {
+        courseId,
+        projectKey,
+        netId: { in: memberNetIds },
+        releasedAt: null,
+      },
     });
     const netIdToAssignment = new Map(assignments.map((a) => [a.netId, a]));
     const allDistinctRepos = [...new Set(assignments.map((a) => a.repoName))];
@@ -195,72 +200,162 @@ export async function reconcileProjectRepoAssignments({
     };
 
     const realAssignments = assignments.filter((a) => !isStale(a.netId));
-    const realDistinctRepos = [...new Set(realAssignments.map((a) => a.repoName))];
+    const realDistinctRepos = [
+      ...new Set(realAssignments.map((a) => a.repoName)),
+    ];
 
     if (allDistinctRepos.length === 0) {
-      await claimForGroup(tx, courseId, projectKey, group.id, memberNetIds, summary);
+      await claimForGroup(
+        tx,
+        courseId,
+        projectKey,
+        group.id,
+        memberNetIds,
+        summary,
+      );
     } else if (allDistinctRepos.length === 1) {
       const repoName = allDistinctRepos[0];
 
-      // All-stale assignments: release and claim fresh; stale rows are exempt from split-conflict checks.
+      // All-stale assignments on the same repo: re-link sourcePartnerGroupId
+      // instead of releasing and claiming a fresh repo. The group was
+      // archived/recreated with the same membership but a new ID.
       if (realDistinctRepos.length === 0) {
-        await realignToFreshRepo(
-          tx, courseId, projectKey, group.id, memberNetIds, [],
-          netIdToAssignment, summary,
+        const staleNetIds = memberNetIds.filter((n) => isStale(n));
+        await relinkStaleAssignments(
+          tx,
+          courseId,
+          projectKey,
+          group.id,
+          staleNetIds,
+          repoName,
         );
         continue;
       }
 
-      const unassignedNetIds = memberNetIds.filter((n) => !netIdToAssignment.has(n));
+      const unassignedNetIds = memberNetIds.filter(
+        (n) => !netIdToAssignment.has(n),
+      );
       if (unassignedNetIds.length === 0) {
         // All members on the same repo; still check for cross-group split conflicts.
         const conflict = await checkSplitConflict(
-          tx, courseId, projectKey, repoName, groupNetIdSet, group.id, netIdToGroupIds,
+          tx,
+          courseId,
+          projectKey,
+          repoName,
+          groupNetIdSet,
+          group.id,
+          netIdToGroupIds,
         );
         if (conflict) {
           summary.conflicts.push({
-            groupId: group.id, netIds: memberNetIds, repos: [repoName], reason: conflict,
+            groupId: group.id,
+            netIds: memberNetIds,
+            repos: [repoName],
+            reason: conflict,
           });
         }
         continue;
       }
 
       const conflict = await checkSplitConflict(
-        tx, courseId, projectKey, repoName, groupNetIdSet, group.id, netIdToGroupIds,
+        tx,
+        courseId,
+        projectKey,
+        repoName,
+        groupNetIdSet,
+        group.id,
+        netIdToGroupIds,
       );
       if (conflict) {
         summary.conflicts.push({
-          groupId: group.id, netIds: memberNetIds, repos: [repoName], reason: conflict,
+          groupId: group.id,
+          netIds: memberNetIds,
+          repos: [repoName],
+          reason: conflict,
         });
       } else {
         await extendRepo(
-          tx, courseId, projectKey, group.id, repoName, unassignedNetIds,
+          tx,
+          courseId,
+          projectKey,
+          group.id,
+          repoName,
+          unassignedNetIds,
         );
-        summary.extended.push({ groupId: group.id, repoName, netIds: unassignedNetIds });
+        summary.extended.push({
+          groupId: group.id,
+          repoName,
+          netIds: unassignedNetIds,
+        });
       }
     } else {
       if (realDistinctRepos.length === 0) {
         const staleNetIds = memberNetIds.filter((n) => isStale(n));
-        const unassignedNetIds = memberNetIds.filter((n) => !netIdToAssignment.has(n));
-        await realignToFreshRepo(
-          tx, courseId, projectKey, group.id, staleNetIds, unassignedNetIds,
-          netIdToAssignment, summary,
-        );
+        const staleRepos = [
+          ...new Set(
+            staleNetIds
+              .map((n) => netIdToAssignment.get(n)?.repoName)
+              .filter((r): r is string => !!r),
+          ),
+        ];
+        if (staleRepos.length === 1) {
+          // All stale but on the same repo — re-link instead of realign.
+          await relinkStaleAssignments(
+            tx,
+            courseId,
+            projectKey,
+            group.id,
+            staleNetIds,
+            staleRepos[0],
+          );
+        } else {
+          // Stale on different repos — genuine conflict, realign.
+          const unassignedNetIds = memberNetIds.filter(
+            (n) => !netIdToAssignment.has(n),
+          );
+          await realignToFreshRepo(
+            tx,
+            courseId,
+            projectKey,
+            group.id,
+            staleNetIds,
+            unassignedNetIds,
+            netIdToAssignment,
+            summary,
+          );
+        }
       } else if (realDistinctRepos.length === 1) {
         const majorityRepo = realDistinctRepos[0];
         const conflict = await checkSplitConflict(
-          tx, courseId, projectKey, majorityRepo, groupNetIdSet, group.id, netIdToGroupIds,
+          tx,
+          courseId,
+          projectKey,
+          majorityRepo,
+          groupNetIdSet,
+          group.id,
+          netIdToGroupIds,
         );
         if (conflict) {
           summary.conflicts.push({
-            groupId: group.id, netIds: memberNetIds, repos: [majorityRepo], reason: conflict,
+            groupId: group.id,
+            netIds: memberNetIds,
+            repos: [majorityRepo],
+            reason: conflict,
           });
         } else {
           const staleNetIds = memberNetIds.filter((n) => isStale(n));
-          const unassignedNetIds = memberNetIds.filter((n) => !netIdToAssignment.has(n));
+          const unassignedNetIds = memberNetIds.filter(
+            (n) => !netIdToAssignment.has(n),
+          );
           await realignToMajorityRepo(
-            tx, courseId, projectKey, group.id, majorityRepo, staleNetIds,
-            unassignedNetIds, netIdToAssignment,
+            tx,
+            courseId,
+            projectKey,
+            group.id,
+            majorityRepo,
+            staleNetIds,
+            unassignedNetIds,
+            netIdToAssignment,
           );
           summary.extended.push({
             groupId: group.id,
@@ -282,6 +377,45 @@ export async function reconcileProjectRepoAssignments({
   return summary;
 }
 
+/**
+ * Re-links stale assignments (whose sourcePartnerGroupId points to an archived
+ * group) to the current active group, without releasing or moving repos.
+ * Used when all stale assignments are already on the same repo — the group
+ * was archived/recreated with identical membership but got a new ID.
+ */
+async function relinkStaleAssignments(
+  tx: Tx,
+  courseId: string,
+  projectKey: string,
+  groupId: string,
+  staleNetIds: string[],
+  repoName: string,
+): Promise<void> {
+  if (staleNetIds.length === 0) return;
+  await tx.projectRepoAssignment.updateMany({
+    where: {
+      courseId,
+      projectKey,
+      netId: { in: staleNetIds },
+      repoName,
+      releasedAt: null,
+    },
+    data: { sourcePartnerGroupId: groupId },
+  });
+  await tx.projectRepoAssignmentAuditLog.createMany({
+    data: staleNetIds.map((netId) => ({
+      courseId,
+      projectKey,
+      netId,
+      oldRepoName: repoName,
+      newRepoName: repoName,
+      action: "relink",
+      actor: SYSTEM_ACTOR,
+      reason: `reconcile: re-linked stale sourcePartnerGroupId to active group ${groupId}`,
+    })),
+  });
+}
+
 async function claimForGroup(
   tx: Tx,
   courseId: string,
@@ -301,15 +435,23 @@ async function claimForGroup(
   }
   await tx.projectRepoAssignment.createMany({
     data: memberNetIds.map((netId) => ({
-      courseId, projectKey, netId, repoName,
-      assignedBy: SYSTEM_ACTOR, sourcePartnerGroupId: groupId,
+      courseId,
+      projectKey,
+      netId,
+      repoName,
+      assignedBy: SYSTEM_ACTOR,
+      sourcePartnerGroupId: groupId,
     })),
   });
   await tx.projectRepoAssignmentAuditLog.createMany({
     data: memberNetIds.map((netId) => ({
-      courseId, projectKey, netId,
-      oldRepoName: null, newRepoName: repoName,
-      action: "claim", actor: SYSTEM_ACTOR,
+      courseId,
+      projectKey,
+      netId,
+      oldRepoName: null,
+      newRepoName: repoName,
+      action: "claim",
+      actor: SYSTEM_ACTOR,
       reason: `reconcile: new claim for group ${groupId}`,
     })),
   });
@@ -326,15 +468,23 @@ async function extendRepo(
 ): Promise<void> {
   await tx.projectRepoAssignment.createMany({
     data: targetNetIds.map((netId) => ({
-      courseId, projectKey, netId, repoName,
-      assignedBy: SYSTEM_ACTOR, sourcePartnerGroupId: groupId,
+      courseId,
+      projectKey,
+      netId,
+      repoName,
+      assignedBy: SYSTEM_ACTOR,
+      sourcePartnerGroupId: groupId,
     })),
   });
   await tx.projectRepoAssignmentAuditLog.createMany({
     data: targetNetIds.map((netId) => ({
-      courseId, projectKey, netId,
-      oldRepoName: null, newRepoName: repoName,
-      action: "extend", actor: SYSTEM_ACTOR,
+      courseId,
+      projectKey,
+      netId,
+      oldRepoName: null,
+      newRepoName: repoName,
+      action: "extend",
+      actor: SYSTEM_ACTOR,
       reason: `reconcile: extend to group ${groupId}`,
     })),
   });
@@ -347,13 +497,21 @@ async function realignToFreshRepo(
   groupId: string,
   staleNetIds: string[],
   unassignedNetIds: string[],
-  netIdToAssignment: Map<string, { repoName: string; sourcePartnerGroupId: string | null }>,
+  netIdToAssignment: Map<
+    string,
+    { repoName: string; sourcePartnerGroupId: string | null }
+  >,
   summary: ReconcileSummary,
 ): Promise<void> {
   const now = new Date();
   if (staleNetIds.length > 0) {
     await tx.projectRepoAssignment.updateMany({
-      where: { courseId, projectKey, netId: { in: staleNetIds }, releasedAt: null },
+      where: {
+        courseId,
+        projectKey,
+        netId: { in: staleNetIds },
+        releasedAt: null,
+      },
       data: { releasedAt: now, releasedBy: SYSTEM_ACTOR },
     });
   }
@@ -369,16 +527,23 @@ async function realignToFreshRepo(
   }
   await tx.projectRepoAssignment.createMany({
     data: targetNetIds.map((netId) => ({
-      courseId, projectKey, netId, repoName,
-      assignedBy: SYSTEM_ACTOR, sourcePartnerGroupId: groupId,
+      courseId,
+      projectKey,
+      netId,
+      repoName,
+      assignedBy: SYSTEM_ACTOR,
+      sourcePartnerGroupId: groupId,
     })),
   });
   await tx.projectRepoAssignmentAuditLog.createMany({
     data: targetNetIds.map((netId) => ({
-      courseId, projectKey, netId,
+      courseId,
+      projectKey,
+      netId,
       oldRepoName: netIdToAssignment.get(netId)?.repoName ?? null,
       newRepoName: repoName,
-      action: "realign", actor: SYSTEM_ACTOR,
+      action: "realign",
+      actor: SYSTEM_ACTOR,
       reason: `reconcile: stale-suppression realign to fresh repo for group ${groupId}`,
     })),
   });
@@ -393,12 +558,20 @@ async function realignToMajorityRepo(
   majorityRepo: string,
   staleNetIds: string[],
   unassignedNetIds: string[],
-  netIdToAssignment: Map<string, { repoName: string; sourcePartnerGroupId: string | null }>,
+  netIdToAssignment: Map<
+    string,
+    { repoName: string; sourcePartnerGroupId: string | null }
+  >,
 ): Promise<void> {
   const now = new Date();
   if (staleNetIds.length > 0) {
     await tx.projectRepoAssignment.updateMany({
-      where: { courseId, projectKey, netId: { in: staleNetIds }, releasedAt: null },
+      where: {
+        courseId,
+        projectKey,
+        netId: { in: staleNetIds },
+        releasedAt: null,
+      },
       data: { releasedAt: now, releasedBy: SYSTEM_ACTOR },
     });
   }
@@ -406,14 +579,20 @@ async function realignToMajorityRepo(
   if (targetNetIds.length === 0) return;
   await tx.projectRepoAssignment.createMany({
     data: targetNetIds.map((netId) => ({
-      courseId, projectKey, netId, repoName: majorityRepo,
-      assignedBy: SYSTEM_ACTOR, sourcePartnerGroupId: groupId,
+      courseId,
+      projectKey,
+      netId,
+      repoName: majorityRepo,
+      assignedBy: SYSTEM_ACTOR,
+      sourcePartnerGroupId: groupId,
     })),
   });
   const staleSet = new Set(staleNetIds);
   await tx.projectRepoAssignmentAuditLog.createMany({
     data: targetNetIds.map((netId) => ({
-      courseId, projectKey, netId,
+      courseId,
+      projectKey,
+      netId,
       oldRepoName: netIdToAssignment.get(netId)?.repoName ?? null,
       newRepoName: majorityRepo,
       action: staleSet.has(netId) ? "realign" : "extend",
@@ -447,7 +626,9 @@ export async function reconcileAllProjectKeys({
   ];
   const summaries: ReconcileSummary[] = [];
   for (const projectKey of projectKeys) {
-    summaries.push(await reconcileProjectRepoAssignments({ tx, courseId, projectKey }));
+    summaries.push(
+      await reconcileProjectRepoAssignments({ tx, courseId, projectKey }),
+    );
   }
   return summaries;
 }
@@ -483,7 +664,10 @@ export async function reconcileAllProjectKeysWithLock({
   for (const projectKey of projectKeys) {
     const lockKey = `projectrepo:claim:${courseId}:${projectKey}`;
     const lockTs = Date.now();
-    const acquired = await redisClient.set(lockKey, lockTs, { NX: true, PX: REDIS_LOCK_PX });
+    const acquired = await redisClient.set(lockKey, lockTs, {
+      NX: true,
+      PX: REDIS_LOCK_PX,
+    });
     if (!acquired) {
       logger?.warn(
         `Could not acquire Redis lock for ${lockKey}, skipping projectKey '${projectKey}'.`,
@@ -492,7 +676,11 @@ export async function reconcileAllProjectKeysWithLock({
     }
     try {
       const summary = await prismaClient.$transaction(async (tx) => {
-        return await reconcileProjectRepoAssignments({ tx, courseId, projectKey });
+        return await reconcileProjectRepoAssignments({
+          tx,
+          courseId,
+          projectKey,
+        });
       });
       summaries.push(summary);
     } finally {

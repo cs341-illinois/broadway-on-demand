@@ -1,4 +1,4 @@
-import { Prisma, PrismaClient, Role } from "../generated/prisma/client.js";
+import { Prisma, PrismaClient } from "../generated/prisma/client.js";
 
 type Tx = PrismaClient | Prisma.TransactionClient;
 
@@ -39,6 +39,10 @@ export function generateRandomGroups(netIds: string[]): string[][] {
  * (courseId, labSection, roundNumber), then creates fresh ones from
  * `groupsOfNetIds`. Archived rows stay queryable via
  * getSectionRoundHistory/getStudentPartnerHistory.
+ *
+ * Groups whose membership is identical to a new group are preserved (not
+ * archived) so their ProjectRepoAssignment.sourcePartnerGroupId stays valid.
+ * Only groups whose membership actually changed are archived and replaced.
  */
 export async function archiveAndCreateGroups({
   tx,
@@ -56,13 +60,51 @@ export async function archiveAndCreateGroups({
   actorNetId: string;
 }) {
   const now = new Date();
-  await tx.partnerGroup.updateMany({
+
+  // Fetch currently active groups with their members
+  const activeGroups = await tx.partnerGroup.findMany({
     where: { courseId, labSection, roundNumber, archivedAt: null },
-    data: { archivedAt: now, archivedBy: actorNetId },
+    include: { members: { select: { netId: true } } },
   });
 
+  // Build a lookup: sorted-member-key → existing active group
+  const activeByKey = new Map<string, string>();
+  for (const g of activeGroups) {
+    const key = g.members
+      .map((m) => m.netId)
+      .sort()
+      .join(",");
+    activeByKey.set(key, g.id);
+  }
+
+  // Partition new groups into those that match an existing group and those
+  // that don't.
   const created = [];
+  const preserved = new Set<string>();
+  const groupsToCreate: string[][] = [];
+
   for (const memberNetIds of groupsOfNetIds) {
+    const key = [...memberNetIds].sort().join(",");
+    const existingId = activeByKey.get(key);
+    if (existingId) {
+      preserved.add(existingId);
+    } else {
+      groupsToCreate.push(memberNetIds);
+    }
+  }
+
+  // Archive only the groups that are NOT being preserved (their membership
+  // changed or they were dropped entirely).
+  const toArchive = activeGroups.filter((g) => !preserved.has(g.id));
+  if (toArchive.length > 0) {
+    await tx.partnerGroup.updateMany({
+      where: { id: { in: toArchive.map((g) => g.id) } },
+      data: { archivedAt: now, archivedBy: actorNetId },
+    });
+  }
+
+  // Create the new groups (only the ones that don't match an existing group)
+  for (const memberNetIds of groupsToCreate) {
     created.push(
       await tx.partnerGroup.create({
         data: {
@@ -71,14 +113,26 @@ export async function archiveAndCreateGroups({
           roundNumber,
           createdBy: actorNetId,
           members: {
-            create: memberNetIds.map((netId) => ({ courseId, netId, roundNumber })),
+            create: memberNetIds.map((netId) => ({
+              courseId,
+              netId,
+              roundNumber,
+            })),
           },
         },
         include: memberInclude,
       }),
     );
   }
-  return created;
+
+  // Return preserved groups (with refreshed member includes) plus newly created
+  // groups, so the caller sees the full set of active groups.
+  const preservedFull = await tx.partnerGroup.findMany({
+    where: { id: { in: [...preserved] } },
+    include: memberInclude,
+  });
+
+  return [...preservedFull, ...created];
 }
 
 /**
