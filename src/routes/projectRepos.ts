@@ -3,7 +3,11 @@ import { FastifyZodOpenApiTypeProvider } from "fastify-zod-openapi";
 import { z } from "zod";
 import { Role } from "../generated/prisma/client.js";
 import { Category } from "../generated/prisma/enums.js";
-import { ConflictError, DatabaseFetchError, ValidationError } from "../errors/index.js";
+import {
+  ConflictError,
+  DatabaseFetchError,
+  ValidationError,
+} from "../errors/index.js";
 import { reconcileProjectRepoAssignments } from "../functions/projectRepos.js";
 
 const courseParams = z.object({ courseId: z.string().min(1) });
@@ -65,7 +69,9 @@ const releaseResponse = z.object({
   warning: z.string(),
 });
 
-function sessionNetId(request: { session: { user?: { email: string } } }): string {
+function sessionNetId(request: {
+  session: { user?: { email: string } };
+}): string {
   return request.session.user!.email.replace("@illinois.edu", "");
 }
 
@@ -111,7 +117,11 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
     async (request, reply) => {
       const { courseId } = request.params;
       const rows = await fastify.prismaClient.assignment.findMany({
-        where: { courseId, category: Category.PROJECT, projectKey: { not: null } },
+        where: {
+          courseId,
+          category: Category.PROJECT,
+          projectKey: { not: null },
+        },
         select: { projectKey: true },
         distinct: ["projectKey"],
       });
@@ -119,7 +129,9 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
         .map((r) => r.projectKey)
         .filter((pk): pk is string => pk !== null)
         .sort();
-      return reply.status(200).send(projectKeys.map((projectKey) => ({ projectKey })));
+      return reply
+        .status(200)
+        .send(projectKeys.map((projectKey) => ({ projectKey })));
     },
   );
 
@@ -140,41 +152,50 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
     async (request, reply) => {
       const { courseId, projectKey } = request.params;
 
-      const [pool, allAssignments, groups, enabledStudents] = await Promise.all([
-        fastify.prismaClient.projectRepoPool.findMany({
-          where: { courseId, projectKey },
-          orderBy: { sortOrder: "asc" },
-          select: { repoName: true, sortOrder: true },
-        }),
-        fastify.prismaClient.projectRepoAssignment.findMany({
-          where: { courseId, projectKey },
-          select: {
-            netId: true,
-            repoName: true,
-            sourcePartnerGroupId: true,
-            assignedAt: true,
-            releasedAt: true,
-            githubAccessConfirmed: true,
-          },
-        }),
-        fastify.prismaClient.partnerGroup.findMany({
-          where: { courseId, roundNumber: 1, archivedAt: null },
-          include: { members: { select: { netId: true } } },
-        }),
-        fastify.prismaClient.users.findMany({
-          where: { courseId, role: Role.STUDENT, enabled: true },
-          select: { netId: true },
-        }),
-      ]);
+      const [pool, allAssignments, groups, enabledStudents] = await Promise.all(
+        [
+          fastify.prismaClient.projectRepoPool.findMany({
+            where: { courseId, projectKey },
+            orderBy: { sortOrder: "asc" },
+            select: { repoName: true, sortOrder: true },
+          }),
+          fastify.prismaClient.projectRepoAssignment.findMany({
+            where: { courseId, projectKey },
+            select: {
+              netId: true,
+              repoName: true,
+              sourcePartnerGroupId: true,
+              assignedAt: true,
+              releasedAt: true,
+              githubAccessConfirmed: true,
+            },
+          }),
+          fastify.prismaClient.partnerGroup.findMany({
+            where: { courseId, roundNumber: 1, archivedAt: null },
+            include: { members: { select: { netId: true } } },
+          }),
+          fastify.prismaClient.users.findMany({
+            where: { courseId, role: Role.STUDENT, enabled: true },
+            select: { netId: true },
+          }),
+        ],
+      );
 
       const enabledNetIds = new Set(enabledStudents.map((s) => s.netId));
 
-      const activeAssignments = allAssignments.filter((a) => a.releasedAt === null);
+      const activeAssignments = allAssignments.filter(
+        (a) => a.releasedAt === null,
+      );
       const assignmentsByRepo = new Map<string, typeof activeAssignments>();
       const allAssignmentsByRepo = new Map<string, typeof allAssignments>();
       const activeAssignmentByNetId = new Map<
         string,
-        { netId: string; repoName: string; sourcePartnerGroupId: string | null; assignedAt: Date }
+        {
+          netId: string;
+          repoName: string;
+          sourcePartnerGroupId: string | null;
+          assignedAt: Date;
+        }
       >();
       for (const a of activeAssignments) {
         activeAssignmentByNetId.set(a.netId, a);
@@ -303,7 +324,8 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
         }))
         .sort(
           (a, b) =>
-            a.repoName.localeCompare(b.repoName) || a.netId.localeCompare(b.netId),
+            a.repoName.localeCompare(b.repoName) ||
+            a.netId.localeCompare(b.netId),
         );
 
       return reply.status(200).send({
@@ -483,17 +505,23 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
       const { courseId, projectKey } = request.params;
       const actorNetId = sessionNetId(request);
 
-      const assignments = await fastify.prismaClient.projectRepoAssignment.findMany({
-        where: { courseId, projectKey, releasedAt: null },
-        select: { netId: true, repoName: true },
-      });
-      const mappings = await fastify.prismaClient.githubUsernameMapping.findMany({
-        where: {
-          courseId,
-          netId: { in: assignments.length ? assignments.map((a) => a.netId) : ["__none__"] },
-        },
-        select: { netId: true, githubUsername: true },
-      });
+      const assignments =
+        await fastify.prismaClient.projectRepoAssignment.findMany({
+          where: { courseId, projectKey, releasedAt: null },
+          select: { netId: true, repoName: true },
+        });
+      const mappings =
+        await fastify.prismaClient.githubUsernameMapping.findMany({
+          where: {
+            courseId,
+            netId: {
+              in: assignments.length
+                ? assignments.map((a) => a.netId)
+                : ["__none__"],
+            },
+          },
+          select: { netId: true, githubUsername: true },
+        });
 
       const usernameByNetId = new Map(
         mappings.map((m) => [m.netId, m.githubUsername]),
@@ -508,12 +536,15 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
         }))
         .sort(
           (a, b) =>
-            a.repoName.localeCompare(b.repoName) || a.netId.localeCompare(b.netId),
+            a.repoName.localeCompare(b.repoName) ||
+            a.netId.localeCompare(b.netId),
         );
 
       const header = "groupID,netId,githubUsername,repoName";
       const lines = rows.map((r) =>
-        [r.groupID, r.netId, r.githubUsername, r.repoName].map(csvEscape).join(","),
+        [r.groupID, r.netId, r.githubUsername, r.repoName]
+          .map(csvEscape)
+          .join(","),
       );
       const csv = [header, ...lines].join("\n");
 
@@ -541,13 +572,15 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
       },
       schema: {
         params: projectKeyParams,
-        response: { 200: z.object({
-          projectKey: z.string(),
-          claimed: z.number(),
-          extended: z.number(),
-          conflicts: z.number(),
-          gaps: z.number(),
-        }) },
+        response: {
+          200: z.object({
+            projectKey: z.string(),
+            claimed: z.number(),
+            extended: z.number(),
+            conflicts: z.number(),
+            gaps: z.number(),
+          }),
+        },
       },
     },
     async (request, reply) => {
@@ -555,10 +588,15 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
 
       const summary = await fastify.prismaClient
         .$transaction(async (tx) => {
-          return await reconcileProjectRepoAssignments({ tx, courseId, projectKey });
+          return await reconcileProjectRepoAssignments({
+            tx,
+            courseId,
+            projectKey,
+          });
         })
         .catch((e) => {
-          if (e instanceof ConflictError || e instanceof ValidationError) throw e;
+          if (e instanceof ConflictError || e instanceof ValidationError)
+            throw e;
           request.log.error(e);
           throw new DatabaseFetchError({ message: "Reconciliation failed." });
         });
@@ -588,13 +626,16 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
       },
       schema: {
         params: projectKeyParams,
-        response: { 200: z.object({
-          confirmed: z.number(),
-          added: z.number(),
-          noMapping: z.number(),
-          failed: z.number(),
-          total: z.number(),
-        }) },
+        response: {
+          200: z.object({
+            confirmed: z.number(),
+            added: z.number(),
+            removed: z.number(),
+            noMapping: z.number(),
+            failed: z.number(),
+            total: z.number(),
+          }),
+        },
       },
     },
     async (request, reply) => {
@@ -602,86 +643,169 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
 
       const course = await fastify.prismaClient.course.findUniqueOrThrow({
         where: { id: courseId },
-        select: { githubOrg: true, githubToken: true },
+        select: { githubOrg: true, githubToken: true, githubRepoPrefix: true },
       });
 
-      const assignments = await fastify.prismaClient.projectRepoAssignment.findMany({
-        where: { courseId, projectKey, releasedAt: null },
-        select: { id: true, netId: true, repoName: true, githubAccessConfirmed: true },
-      });
+      const staffTeam = `${course.githubRepoPrefix}_staff-team`;
+
+      const assignments =
+        await fastify.prismaClient.projectRepoAssignment.findMany({
+          where: { courseId, projectKey, releasedAt: null },
+          select: {
+            id: true,
+            netId: true,
+            repoName: true,
+            githubAccessConfirmed: true,
+          },
+        });
 
       const netIds = [...new Set(assignments.map((a) => a.netId))];
-      const mappings = await fastify.prismaClient.githubUsernameMapping.findMany({
-        where: { courseId, netId: { in: netIds } },
-        select: { netId: true, githubUsername: true },
-      });
-      const usernameByNetId = new Map(mappings.map((m) => [m.netId, m.githubUsername]));
+      const mappings =
+        await fastify.prismaClient.githubUsernameMapping.findMany({
+          where: { courseId, netId: { in: netIds } },
+          select: { netId: true, githubUsername: true },
+        });
+      const usernameByNetId = new Map(
+        mappings.map((m) => [m.netId, m.githubUsername]),
+      );
+
+      // Group assignments by repo for per-repo collaborator management
+      const assignmentsByRepo = new Map<string, typeof assignments>();
+      for (const a of assignments) {
+        const list = assignmentsByRepo.get(a.repoName) ?? [];
+        list.push(a);
+        assignmentsByRepo.set(a.repoName, list);
+      }
 
       const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+      const ghHeaders = {
+        Authorization: `Bearer ${course.githubToken}`,
+        Accept: "application/vnd.github+json",
+      };
+
       let confirmed = 0;
       let added = 0;
+      let removed = 0;
       let noMapping = 0;
       let failed = 0;
 
-      for (const a of assignments) {
-        const username = usernameByNetId.get(a.netId);
-        if (!username) { noMapping++; continue; }
-
-        if (a.githubAccessConfirmed) { confirmed++; continue; }
+      for (const [repoName, repoAssignments] of assignmentsByRepo) {
+        // Build the set of GitHub usernames that SHOULD have access
+        const expectedUsernames = new Set<string>();
+        let repoHasNoMapping = false;
+        for (const a of repoAssignments) {
+          const username = usernameByNetId.get(a.netId);
+          if (!username) {
+            repoHasNoMapping = true;
+            noMapping++;
+          } else {
+            expectedUsernames.add(username);
+          }
+        }
 
         try {
-          const checkRes = await fetch(
-            `https://api.github.com/repos/${course.githubOrg}/${a.repoName}/collaborators/${username}`,
-            { headers: { Authorization: `Bearer ${course.githubToken}`, Accept: "application/vnd.github+json" } },
-          );
-
-          if (checkRes.status === 204) {
-            confirmed++;
-          } else if (checkRes.status === 404) {
-            const addRes = await fetch(
-              `https://api.github.com/repos/${course.githubOrg}/${a.repoName}/collaborators/${username}`,
-              {
-                method: "PUT",
-                headers: {
-                  Authorization: `Bearer ${course.githubToken}`,
-                  Accept: "application/vnd.github+json",
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify({ permission: "push" }),
-              },
+          // List current direct collaborators on the repo
+          let currentCollaborators: string[] = [];
+          let page = 1;
+          while (true) {
+            const listRes = await fetch(
+              `https://api.github.com/repos/${course.githubOrg}/${repoName}/collaborators?affiliation=direct&per_page=100&page=${page}`,
+              { headers: ghHeaders },
             );
-            if (addRes.status !== 201 && addRes.status !== 204) {
-              throw new Error(`Add failed: ${addRes.status}`);
+            if (listRes.status !== 200) {
+              throw new Error(`List collaborators failed: ${listRes.status}`);
             }
-            added++;
-          } else {
-            throw new Error(`Check failed: ${checkRes.status}`);
+            const collabs = (await listRes.json()) as { login: string }[];
+            for (const c of collabs) {
+              currentCollaborators.push(c.login);
+            }
+            if (collabs.length < 100) break;
+            page++;
+            await sleep(300);
           }
 
-          await fastify.prismaClient.projectRepoAssignment.update({
-            where: { id: a.id },
-            data: { githubAccessConfirmed: true },
-          });
+          // Add missing assigned students
+          for (const a of repoAssignments) {
+            const username = usernameByNetId.get(a.netId);
+            if (!username) continue;
 
-          await sleep(300);
+            if (a.githubAccessConfirmed) {
+              confirmed++;
+              continue;
+            }
+
+            if (currentCollaborators.includes(username)) {
+              confirmed++;
+            } else {
+              const addRes = await fetch(
+                `https://api.github.com/repos/${course.githubOrg}/${repoName}/collaborators/${username}`,
+                {
+                  method: "PUT",
+                  headers: { ...ghHeaders, "Content-Type": "application/json" },
+                  body: JSON.stringify({ permission: "push" }),
+                },
+              );
+              if (addRes.status !== 201 && addRes.status !== 204) {
+                throw new Error(`Add failed: ${addRes.status} for ${username}`);
+              }
+              added++;
+              currentCollaborators.push(username);
+            }
+
+            await fastify.prismaClient.projectRepoAssignment.update({
+              where: { id: a.id },
+              data: { githubAccessConfirmed: true },
+            });
+            await sleep(300);
+          }
+
+          // Remove collaborators who shouldn't have access (preserve staff team)
+          for (const login of currentCollaborators) {
+            if (login === staffTeam) continue;
+            if (expectedUsernames.has(login)) continue;
+
+            const removeRes = await fetch(
+              `https://api.github.com/repos/${course.githubOrg}/${repoName}/collaborators/${login}`,
+              { method: "DELETE", headers: ghHeaders },
+            );
+            if (removeRes.status !== 204) {
+              request.log.warn(
+                { repoName, login, status: removeRes.status },
+                "Failed to remove stale collaborator",
+              );
+              continue;
+            }
+            removed++;
+            await sleep(300);
+          }
         } catch (e: any) {
           request.log.error(
-            { netId: a.netId, repoName: a.repoName, err: e.message },
-            "Failed to sync GitHub access",
+            { repoName, err: e.message },
+            "Failed to sync GitHub access for repo",
           );
-          failed++;
+          failed += repoAssignments.length - (repoHasNoMapping ? 0 : 0);
         }
       }
 
       request.log.info(
-        { courseId, projectKey, confirmed, added, noMapping, failed, total: assignments.length },
+        {
+          courseId,
+          projectKey,
+          confirmed,
+          added,
+          removed,
+          noMapping,
+          failed,
+          total: assignments.length,
+        },
         "GitHub access sync completed",
       );
 
       return reply.status(200).send({
         confirmed,
         added,
+        removed,
         noMapping,
         failed,
         total: assignments.length,
