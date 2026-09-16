@@ -1,6 +1,8 @@
 import { Prisma, PrismaClient, Category } from "../generated/prisma/client.js";
 import { type RedisClientType } from "redis";
 import { type FastifyBaseLogger } from "fastify";
+import { ConflictError, ValidationError } from "../errors/index.js";
+import { getGroupForStudent } from "./partners.js";
 
 type Tx = Prisma.TransactionClient;
 
@@ -44,6 +46,12 @@ export type ReconcileSummary = {
   conflicts: ReconcileConflict[];
   gaps: ReconcileGap[];
   skipped: ReconcileSkipped[];
+};
+
+export type ManualAssignResult = {
+  netId: string;
+  repoName: string;
+  previousRepoName: string | null;
 };
 
 type PoolRow = { id: string; repoName: string };
@@ -108,6 +116,130 @@ async function checkSplitConflict(
     }
   }
   return null;
+}
+
+/**
+ * Manually assigns one or more netIds to a specific repoName, bypassing the
+ * free-pool claim logic entirely — this is the escape hatch for repos that
+ * already have history (e.g. re-assigning a student back to their own old
+ * repo after their partner moved on) as well as ordinary manual fixes.
+ *
+ * For each netId: if they already have a different active assignment, it is
+ * released and audit-logged before the new one is created (auto-relink,
+ * mirroring how reconcile's realign functions behave). If they're already on
+ * `repoName`, it's a no-op. Rejects if `repoName` is currently actively
+ * assigned to someone NOT in `netIds` — that has to be resolved (release, or
+ * include them) before this repo can be reused.
+ */
+export async function manualAssignRepo({
+  tx,
+  courseId,
+  projectKey,
+  netIds,
+  repoName,
+  actorNetId,
+}: {
+  tx: Tx;
+  courseId: string;
+  projectKey: string;
+  netIds: string[];
+  repoName: string;
+  actorNetId: string;
+}): Promise<ManualAssignResult[]> {
+  const pool = await tx.projectRepoPool.findFirst({
+    where: { courseId, projectKey, repoName },
+    select: { id: true },
+  });
+  if (!pool) {
+    throw new ValidationError({
+      message: `Repo '${repoName}' is not in the pool for project '${projectKey}'.`,
+    });
+  }
+
+  const activeOnRepo = await tx.projectRepoAssignment.findMany({
+    where: { courseId, projectKey, repoName, releasedAt: null },
+    select: { netId: true },
+  });
+  const netIdSet = new Set(netIds);
+  const blockers = activeOnRepo
+    .map((a) => a.netId)
+    .filter((n) => !netIdSet.has(n));
+  if (blockers.length > 0) {
+    throw new ConflictError({
+      message: `Repo '${repoName}' is already actively assigned to ${blockers.join(", ")}. Release them or include them in this assignment first.`,
+    });
+  }
+
+  const now = new Date();
+  const results: ManualAssignResult[] = [];
+
+  for (const netId of netIds) {
+    const existingActive = await tx.projectRepoAssignment.findFirst({
+      where: { courseId, projectKey, netId, releasedAt: null },
+    });
+
+    if (existingActive && existingActive.repoName === repoName) {
+      results.push({ netId, repoName, previousRepoName: repoName });
+      continue;
+    }
+
+    if (existingActive) {
+      await tx.projectRepoAssignment.update({
+        where: { id: existingActive.id },
+        data: { releasedAt: now, releasedBy: actorNetId },
+      });
+      await tx.projectRepoAssignmentAuditLog.create({
+        data: {
+          courseId,
+          projectKey,
+          netId,
+          oldRepoName: existingActive.repoName,
+          newRepoName: null,
+          action: "release",
+          actor: actorNetId,
+          reason: `manual reassignment: released before assigning to ${repoName}`,
+        },
+      });
+    }
+
+    const currentGroup = await getGroupForStudent({
+      tx,
+      courseId,
+      netId,
+      roundNumber: 1,
+    });
+
+    await tx.projectRepoAssignment.create({
+      data: {
+        courseId,
+        projectKey,
+        netId,
+        repoName,
+        assignedBy: actorNetId,
+        sourcePartnerGroupId: currentGroup?.id ?? null,
+      },
+    });
+    await tx.projectRepoAssignmentAuditLog.create({
+      data: {
+        courseId,
+        projectKey,
+        netId,
+        oldRepoName: existingActive?.repoName ?? null,
+        newRepoName: repoName,
+        action: "manual_assign",
+        actor: actorNetId,
+        reason: `manually assigned by ${actorNetId}`,
+      },
+    });
+
+    results.push({
+      netId,
+      repoName,
+      previousRepoName: existingActive?.repoName ?? null,
+    });
+  }
+
+  return results;
 }
 
 /**

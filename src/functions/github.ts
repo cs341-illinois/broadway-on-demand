@@ -437,6 +437,51 @@ export async function overwriteRosterToGithub({
   }
 }
 
+/**
+ * Adds a single user as a direct collaborator on a single repo. Scoped
+ * counterpart to the full syncAccess sweep (which lists/adds/removes across
+ * every repo in a project) — use this right after a targeted assignment
+ * (e.g. manual assign) so the student doesn't wait for the next bulk sync.
+ * Returns added: true for a fresh invite (201), false if they already had
+ * access (204, GitHub's response for an existing collaborator).
+ */
+export async function addRepoCollaborator({
+  githubToken,
+  orgName,
+  repoName,
+  username,
+  logger,
+}: {
+  githubToken: string;
+  orgName: string;
+  repoName: string;
+  username: string;
+  logger: FastifyBaseLogger;
+}): Promise<{ added: boolean }> {
+  const res = await fetch(
+    `https://api.github.com/repos/${orgName}/${repoName}/collaborators/${username}`,
+    {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${githubToken}`,
+        Accept: "application/vnd.github+json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ permission: "push" }),
+    },
+  );
+  if (res.status !== 201 && res.status !== 204) {
+    logger.error(
+      { orgName, repoName, username, status: res.status },
+      "Failed to add GitHub collaborator",
+    );
+    throw new Error(
+      `Failed to add collaborator ${username} to ${repoName}: HTTP ${res.status}`,
+    );
+  }
+  return { added: res.status === 201 };
+}
+
 export async function getLatestCommit({
   githubToken,
   orgName,

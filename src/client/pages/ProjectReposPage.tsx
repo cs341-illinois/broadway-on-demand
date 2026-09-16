@@ -132,6 +132,9 @@ function ProjectReposContent({
   const [isReconciling, setIsReconciling] = useState(false);
   const [showReconcileConfirm, setShowReconcileConfirm] = useState(false);
   const [isSyncingAccess, setIsSyncingAccess] = useState(false);
+  const [assignNetIdsInput, setAssignNetIdsInput] = useState("");
+  const [assignRepoNameInput, setAssignRepoNameInput] = useState("");
+  const [isAssigning, setIsAssigning] = useState(false);
 
   useEffect(() => {
     if (projects.length > 0 && !projects.some((p) => p.projectKey === selectedProjectKey)) {
@@ -276,6 +279,52 @@ function ProjectReposContent({
     }
   };
 
+  const handleAssign = async () => {
+    if (!selectedProjectKey) return;
+    const netIds = assignNetIdsInput
+      .split(/[\s,]+/)
+      .map((n) => n.trim())
+      .filter((n) => n.length > 0);
+    const repoName = assignRepoNameInput.trim();
+    if (netIds.length === 0 || !repoName) {
+      showAlert("Enter at least one netId and a target repo name.", "warning");
+      return;
+    }
+    setIsAssigning(true);
+    try {
+      const result = await fetchJson<{
+        results: {
+          netId: string;
+          repoName: string;
+          previousRepoName: string | null;
+          githubAccessGranted: boolean;
+          githubAccessError: string | null;
+        }[];
+      }>(`api/v1/projectRepos/${courseId}/${selectedProjectKey}/assign`, {
+        method: "POST",
+        body: JSON.stringify({ netIds, repoName }),
+      });
+      const lines = result.results.map((r) => {
+        const moved = r.previousRepoName && r.previousRepoName !== r.repoName
+          ? ` (was ${r.previousRepoName})`
+          : "";
+        const access = r.githubAccessGranted
+          ? "access granted"
+          : `access NOT granted: ${r.githubAccessError}`;
+        return `${r.netId} → ${r.repoName}${moved} — ${access}`;
+      });
+      const anyAccessFailed = result.results.some((r) => !r.githubAccessGranted);
+      showAlert(lines.join("; "), anyAccessFailed ? "warning" : "success", 10000);
+      setAssignNetIdsInput("");
+      setAssignRepoNameInput("");
+      refresh();
+    } catch (error) {
+      showAlert((error as Error).message || "Manual assignment failed.", "danger");
+    } finally {
+      setIsAssigning(false);
+    }
+  };
+
   const handleSyncAccess = async () => {
     if (!selectedProjectKey) return;
     setIsSyncingAccess(true);
@@ -400,6 +449,71 @@ function ProjectReposContent({
 
             {status && (
               <>
+                {isAdmin && (
+                  <Row className="mb-4">
+                    <Col>
+                      <Card border="primary">
+                        <Card.Header as="h5">Manually Assign Repo</Card.Header>
+                        <Card.Body>
+                          <p className="text-muted">
+                            Assigns the given netId(s) to a specific repo,
+                            bypassing the free-pool claim logic. Useful for
+                            giving a student back a repo they've already used
+                            (e.g. after a partner change), or fixing a gap by
+                            hand. If a netId already has a different active
+                            assignment, it is released first. GitHub access is
+                            granted immediately for just these netIds.
+                          </p>
+                          <Row className="g-2 align-items-end">
+                            <Col md={5}>
+                              <Form.Label>NetId(s)</Form.Label>
+                              <Form.Control
+                                type="text"
+                                placeholder="e.g. annacg4"
+                                value={assignNetIdsInput}
+                                onChange={(e) =>
+                                  setAssignNetIdsInput(e.target.value)
+                                }
+                              />
+                              <Form.Text className="text-muted">
+                                Comma or space separated for multiple.
+                              </Form.Text>
+                            </Col>
+                            <Col md={4}>
+                              <Form.Label>Target Repo</Form.Label>
+                              <Form.Control
+                                type="text"
+                                placeholder="e.g. fa26_cs341_.project-1_.team-104"
+                                value={assignRepoNameInput}
+                                onChange={(e) =>
+                                  setAssignRepoNameInput(e.target.value)
+                                }
+                              />
+                            </Col>
+                            <Col md={3}>
+                              <Button
+                                variant="primary"
+                                onClick={handleAssign}
+                                disabled={isAssigning}
+                                className="w-100"
+                              >
+                                {isAssigning ? (
+                                  <Spinner
+                                    as="span"
+                                    size="sm"
+                                    animation="border"
+                                    className="me-1"
+                                  />
+                                ) : null}
+                                Assign
+                              </Button>
+                            </Col>
+                          </Row>
+                        </Card.Body>
+                      </Card>
+                    </Col>
+                  </Row>
+                )}
                 <Row className="mb-4">
                   <Col>
                     <Card>
@@ -568,6 +682,7 @@ function ProjectReposContent({
                               <tr>
                                 <th>Group</th>
                                 <th>Unassigned NetIds</th>
+                                {isAdmin && <th>Actions</th>}
                               </tr>
                             </thead>
                             <tbody>
@@ -575,6 +690,21 @@ function ProjectReposContent({
                                 <tr key={g.partnerGroupId}>
                                   <td>{g.partnerGroupId}</td>
                                   <td>{g.members.map((m) => m.netId).join(", ")}</td>
+                                  {isAdmin && (
+                                    <td>
+                                      <Button
+                                        variant="outline-primary"
+                                        size="sm"
+                                        onClick={() =>
+                                          setAssignNetIdsInput(
+                                            g.members.map((m) => m.netId).join(", "),
+                                          )
+                                        }
+                                      >
+                                        Fill into Assign form
+                                      </Button>
+                                    </td>
+                                  )}
                                 </tr>
                               ))}
                             </tbody>

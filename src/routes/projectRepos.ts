@@ -8,7 +8,11 @@ import {
   DatabaseFetchError,
   ValidationError,
 } from "../errors/index.js";
-import { reconcileProjectRepoAssignments } from "../functions/projectRepos.js";
+import {
+  reconcileProjectRepoAssignments,
+  manualAssignRepo,
+} from "../functions/projectRepos.js";
+import { addRepoCollaborator } from "../functions/github.js";
 
 const courseParams = z.object({ courseId: z.string().min(1) });
 
@@ -63,6 +67,23 @@ const projectReposStatusResponse = z.object({
 });
 
 const releaseBody = z.object({ repoName: z.string().min(1) });
+
+const assignBody = z.object({
+  netIds: z.array(z.string().min(1)).min(1),
+  repoName: z.string().min(1),
+});
+
+const assignResultEntry = z.object({
+  netId: z.string(),
+  repoName: z.string(),
+  previousRepoName: z.string().nullable(),
+  githubAccessGranted: z.boolean(),
+  githubAccessError: z.string().nullable(),
+});
+
+const assignResponse = z.object({
+  results: z.array(assignResultEntry),
+});
 
 const releaseResponse = z.object({
   released: z.number().int(),
@@ -613,6 +634,114 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
         conflicts: summary.conflicts.length,
         gaps: summary.gaps.length,
       });
+    },
+  );
+
+  fastify.withTypeProvider<FastifyZodOpenApiTypeProvider>().post(
+    "/:courseId/:projectKey/assign",
+    {
+      onRequest: async (request, reply) => {
+        await fastify.authorize(request, reply, request.params.courseId, [
+          Role.ADMIN,
+        ]);
+      },
+      schema: {
+        params: projectKeyParams,
+        body: assignBody,
+        response: { 200: assignResponse },
+      },
+    },
+    async (request, reply) => {
+      const { courseId, projectKey } = request.params;
+      const { netIds, repoName } = request.body;
+      const actorNetId = sessionNetId(request);
+
+      const assignResults = await fastify.prismaClient
+        .$transaction((tx) =>
+          manualAssignRepo({
+            tx,
+            courseId,
+            projectKey,
+            netIds,
+            repoName,
+            actorNetId,
+          }),
+        )
+        .catch((e) => {
+          if (e instanceof ConflictError || e instanceof ValidationError)
+            throw e;
+          request.log.error(e);
+          throw new DatabaseFetchError({
+            message: "Manual repo assignment failed.",
+          });
+        });
+
+      // Grant access one collaborator at a time — scoped to just the
+      // students we touched, not the full project-wide syncAccess sweep.
+      const course = await fastify.prismaClient.course.findUniqueOrThrow({
+        where: { id: courseId },
+        select: { githubOrg: true, githubToken: true },
+      });
+      const mappings = await fastify.prismaClient.githubUsernameMapping.findMany(
+        { where: { courseId, netId: { in: netIds } }, select: { netId: true, githubUsername: true } },
+      );
+      const usernameByNetId = new Map(
+        mappings.map((m) => [m.netId, m.githubUsername]),
+      );
+
+      const results: z.infer<typeof assignResultEntry>[] = [];
+      for (const r of assignResults) {
+        const username = usernameByNetId.get(r.netId);
+        if (!username) {
+          results.push({
+            ...r,
+            githubAccessGranted: false,
+            githubAccessError: "No GitHub username mapping found.",
+          });
+          continue;
+        }
+        try {
+          await addRepoCollaborator({
+            githubToken: course.githubToken,
+            orgName: course.githubOrg,
+            repoName: r.repoName,
+            username,
+            logger: request.log,
+          });
+          await fastify.prismaClient.projectRepoAssignment.updateMany({
+            where: {
+              courseId,
+              projectKey,
+              netId: r.netId,
+              repoName: r.repoName,
+              releasedAt: null,
+            },
+            data: { githubAccessConfirmed: true },
+          });
+          results.push({
+            ...r,
+            githubAccessGranted: true,
+            githubAccessError: null,
+          });
+        } catch (e: any) {
+          request.log.error(
+            { err: e.message, netId: r.netId, repoName: r.repoName },
+            "Failed to grant GitHub access after manual assign",
+          );
+          results.push({
+            ...r,
+            githubAccessGranted: false,
+            githubAccessError: e.message || "Unknown error",
+          });
+        }
+      }
+
+      request.log.info(
+        { courseId, projectKey, netIds, repoName, actorNetId, results },
+        "Manual project repo assignment",
+      );
+
+      return reply.status(200).send({ results });
     },
   );
 
