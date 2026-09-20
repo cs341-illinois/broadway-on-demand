@@ -772,6 +772,32 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
         }
       }
 
+      // Same for auto-relink: a netId that moved off a previous repo must not
+      // keep push access to the repo they left behind.
+      for (const r of grantResults) {
+        if (!r.previousRepoName || r.previousRepoName === repoName) continue;
+        const username = usernameByNetId.get(r.netId);
+        if (!username) {
+          accessWarnings.push(
+            `${r.netId}: no GitHub username mapping — remove manually from ${r.previousRepoName} if needed`,
+          );
+          continue;
+        }
+        try {
+          await removeRepoCollaborator({
+            githubToken: course.githubToken,
+            orgName: course.githubOrg,
+            repoName: r.previousRepoName,
+            username,
+            logger: request.log,
+          });
+        } catch (e: any) {
+          accessWarnings.push(
+            `${r.netId} (${username}) from ${r.previousRepoName}: ${e.message}`,
+          );
+        }
+      }
+
       request.log.info(
         {
           courseId,
