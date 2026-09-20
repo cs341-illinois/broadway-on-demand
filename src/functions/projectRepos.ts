@@ -54,6 +54,11 @@ export type ManualAssignResult = {
   previousRepoName: string | null;
 };
 
+export type ManualAssignOutcome = {
+  results: ManualAssignResult[];
+  releasedBlockers: string[];
+};
+
 type PoolRow = { id: string; repoName: string };
 
 /**
@@ -127,9 +132,13 @@ async function checkSplitConflict(
  * For each netId: if they already have a different active assignment, it is
  * released and audit-logged before the new one is created (auto-relink,
  * mirroring how reconcile's realign functions behave). If they're already on
- * `repoName`, it's a no-op. Rejects if `repoName` is currently actively
- * assigned to someone NOT in `netIds` — that has to be resolved (release, or
- * include them) before this repo can be reused.
+ * `repoName`, it's a no-op.
+ *
+ * If `repoName` is currently actively assigned to someone NOT in `netIds`,
+ * the caller chooses the resolution via `displaceBlockers`: when true, those
+ * holders are released (audit-logged) so the assignment can proceed — the
+ * "assign this pair somewhere new" flow. When false, a ConflictError lists
+ * the holders so the admin can release or include them explicitly.
  */
 export async function manualAssignRepo({
   tx,
@@ -138,6 +147,7 @@ export async function manualAssignRepo({
   netIds,
   repoName,
   actorNetId,
+  displaceBlockers = false,
 }: {
   tx: Tx;
   courseId: string;
@@ -145,7 +155,9 @@ export async function manualAssignRepo({
   netIds: string[];
   repoName: string;
   actorNetId: string;
-}): Promise<ManualAssignResult[]> {
+  displaceBlockers?: boolean;
+}): Promise<ManualAssignOutcome> {
+  const now = new Date();
   const pool = await tx.projectRepoPool.findFirst({
     where: { courseId, projectKey, repoName },
     select: { id: true },
@@ -164,13 +176,38 @@ export async function manualAssignRepo({
   const blockers = activeOnRepo
     .map((a) => a.netId)
     .filter((n) => !netIdSet.has(n));
+  const releasedBlockers: string[] = [];
   if (blockers.length > 0) {
-    throw new ConflictError({
-      message: `Repo '${repoName}' is already actively assigned to ${blockers.join(", ")}. Release them or include them in this assignment first.`,
+    if (!displaceBlockers) {
+      throw new ConflictError({
+        message: `Repo '${repoName}' is already actively assigned to ${blockers.join(", ")}. Release them or include them in this assignment first.`,
+      });
+    }
+    await tx.projectRepoAssignment.updateMany({
+      where: {
+        courseId,
+        projectKey,
+        repoName,
+        releasedAt: null,
+        netId: { in: blockers },
+      },
+      data: { releasedAt: now, releasedBy: actorNetId },
     });
+    await tx.projectRepoAssignmentAuditLog.createMany({
+      data: blockers.map((netId) => ({
+        courseId,
+        projectKey,
+        netId,
+        oldRepoName: repoName,
+        newRepoName: null,
+        action: "release",
+        actor: actorNetId,
+        reason: `manual reassignment: released to free '${repoName}' for ${netIds.join(", ")}`,
+      })),
+    });
+    releasedBlockers.push(...blockers);
   }
 
-  const now = new Date();
   const results: ManualAssignResult[] = [];
 
   for (const netId of netIds) {
@@ -239,7 +276,7 @@ export async function manualAssignRepo({
     });
   }
 
-  return results;
+  return { results, releasedBlockers };
 }
 
 /**

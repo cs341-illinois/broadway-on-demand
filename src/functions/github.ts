@@ -482,6 +482,41 @@ export async function addRepoCollaborator({
   return { added: res.status === 201 };
 }
 
+export async function removeRepoCollaborator({
+  githubToken,
+  orgName,
+  repoName,
+  username,
+  logger,
+}: {
+  githubToken: string;
+  orgName: string;
+  repoName: string;
+  username: string;
+  logger: FastifyBaseLogger;
+}): Promise<{ removed: boolean }> {
+  const res = await fetch(
+    `https://api.github.com/repos/${orgName}/${repoName}/collaborators/${username}`,
+    {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${githubToken}`,
+        Accept: "application/vnd.github+json",
+      },
+    },
+  );
+  if (res.status !== 204 && res.status !== 404) {
+    logger.error(
+      { orgName, repoName, username, status: res.status },
+      "Failed to remove GitHub collaborator",
+    );
+    throw new Error(
+      `Failed to remove collaborator ${username} from ${repoName}: HTTP ${res.status}`,
+    );
+  }
+  return { removed: res.status === 204 };
+}
+
 export async function getLatestCommit({
   githubToken,
   orgName,

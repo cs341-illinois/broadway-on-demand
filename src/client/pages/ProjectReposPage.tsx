@@ -95,7 +95,9 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   return response.status === 204 ? (undefined as T) : response.json();
 }
 
-async function getProjectReposPageData(courseId: string): Promise<ProjectReposPageData> {
+async function getProjectReposPageData(
+  courseId: string,
+): Promise<ProjectReposPageData> {
   const [courseDetails, projects] = await Promise.all([
     fetchJson<CourseInformationResponse>(`api/v1/courses/${courseId}`),
     fetchJson<ProjectEntry[]>(`api/v1/projectRepos/${courseId}/projects`),
@@ -135,9 +137,15 @@ function ProjectReposContent({
   const [assignNetIdsInput, setAssignNetIdsInput] = useState("");
   const [assignRepoNameInput, setAssignRepoNameInput] = useState("");
   const [isAssigning, setIsAssigning] = useState(false);
+  const [assignConflictBlockers, setAssignConflictBlockers] = useState<
+    string[]
+  >([]);
 
   useEffect(() => {
-    if (projects.length > 0 && !projects.some((p) => p.projectKey === selectedProjectKey)) {
+    if (
+      projects.length > 0 &&
+      !projects.some((p) => p.projectKey === selectedProjectKey)
+    ) {
       setSelectedProjectKey(projects[0].projectKey);
     }
   }, [projects, selectedProjectKey]);
@@ -198,7 +206,10 @@ function ProjectReposContent({
       setReleaseTarget(null);
       refresh();
     } catch (error) {
-      showAlert((error as Error).message || "Failed to release repo.", "danger");
+      showAlert(
+        (error as Error).message || "Failed to release repo.",
+        "danger",
+      );
     } finally {
       setIsReleasing(false);
     }
@@ -220,7 +231,10 @@ function ProjectReposContent({
       setReclaimTarget(null);
       refresh();
     } catch (error) {
-      showAlert((error as Error).message || "Failed to reclaim repo.", "danger");
+      showAlert(
+        (error as Error).message || "Failed to reclaim repo.",
+        "danger",
+      );
     } finally {
       setIsReclaiming(false);
     }
@@ -231,7 +245,9 @@ function ProjectReposContent({
     setIsExporting(true);
     try {
       const response = await fetch(
-        formulateUrl(`api/v1/projectRepos/${courseId}/${selectedProjectKey}/export`),
+        formulateUrl(
+          `api/v1/projectRepos/${courseId}/${selectedProjectKey}/export`,
+        ),
         { credentials: "include" },
       );
       if (!response.ok) {
@@ -279,17 +295,39 @@ function ProjectReposContent({
     }
   };
 
-  const handleAssign = async () => {
+  const handleAssign = async (opts?: {
+    displaceBlockers?: boolean;
+    includeBlockers?: string[];
+  }) => {
     if (!selectedProjectKey) return;
     const netIds = assignNetIdsInput
       .split(/[\s,]+/)
       .map((n) => n.trim())
       .filter((n) => n.length > 0);
+    const allNetIds = [
+      ...new Set([...netIds, ...(opts?.includeBlockers ?? [])]),
+    ];
     const repoName = assignRepoNameInput.trim();
-    if (netIds.length === 0 || !repoName) {
+    if (allNetIds.length === 0 || !repoName) {
       showAlert("Enter at least one netId and a target repo name.", "warning");
       return;
     }
+    if (!opts?.displaceBlockers) {
+      const finalNetIdSet = new Set(allNetIds);
+      const blockers = (status?.assignments ?? [])
+        .filter((a) => a.repoName === repoName)
+        .map((a) => a.netId)
+        .filter((n) => !finalNetIdSet.has(n));
+      if (blockers.length > 0) {
+        setAssignConflictBlockers(blockers);
+        showAlert(
+          `${repoName} is actively assigned to ${blockers.join(", ")}. Choose how to resolve it below.`,
+          "warning",
+        );
+        return;
+      }
+    }
+    setAssignConflictBlockers([]);
     setIsAssigning(true);
     try {
       const result = await fetchJson<{
@@ -300,26 +338,48 @@ function ProjectReposContent({
           githubAccessGranted: boolean;
           githubAccessError: string | null;
         }[];
+        releasedBlockers: string[];
+        accessWarnings: string[];
       }>(`api/v1/projectRepos/${courseId}/${selectedProjectKey}/assign`, {
         method: "POST",
-        body: JSON.stringify({ netIds, repoName }),
+        body: JSON.stringify({
+          netIds: allNetIds,
+          repoName,
+          displaceBlockers: !!opts?.displaceBlockers,
+        }),
       });
       const lines = result.results.map((r) => {
-        const moved = r.previousRepoName && r.previousRepoName !== r.repoName
-          ? ` (was ${r.previousRepoName})`
-          : "";
+        const moved =
+          r.previousRepoName && r.previousRepoName !== r.repoName
+            ? ` (was ${r.previousRepoName})`
+            : "";
         const access = r.githubAccessGranted
           ? "access granted"
           : `access NOT granted: ${r.githubAccessError}`;
         return `${r.netId} → ${r.repoName}${moved} — ${access}`;
       });
-      const anyAccessFailed = result.results.some((r) => !r.githubAccessGranted);
-      showAlert(lines.join("; "), anyAccessFailed ? "warning" : "success", 10000);
+      if (result.releasedBlockers.length > 0) {
+        lines.push(
+          `released previous holder(s): ${result.releasedBlockers.join(", ")}`,
+        );
+      }
+      for (const w of result.accessWarnings) lines.push(`⚠ ${w}`);
+      const anyAccessFailed =
+        result.results.some((r) => !r.githubAccessGranted) ||
+        result.accessWarnings.length > 0;
+      showAlert(
+        lines.join("; "),
+        anyAccessFailed ? "warning" : "success",
+        10000,
+      );
       setAssignNetIdsInput("");
       setAssignRepoNameInput("");
       refresh();
     } catch (error) {
-      showAlert((error as Error).message || "Manual assignment failed.", "danger");
+      showAlert(
+        (error as Error).message || "Manual assignment failed.",
+        "danger",
+      );
     } finally {
       setIsAssigning(false);
     }
@@ -344,7 +404,11 @@ function ProjectReposContent({
       if (result.confirmed) parts.push(`${result.confirmed} already confirmed`);
       if (result.noMapping) parts.push(`${result.noMapping} missing username`);
       if (result.failed) parts.push(`${result.failed} failed`);
-      showAlert(`GitHub access sync: ${parts.join(", ")}.`, result.failed > 0 ? "warning" : "success", 8000);
+      showAlert(
+        `GitHub access sync: ${parts.join(", ")}.`,
+        result.failed > 0 ? "warning" : "success",
+        8000,
+      );
       refresh();
     } catch (error) {
       showAlert((error as Error).message || "Access sync failed.", "danger");
@@ -381,7 +445,12 @@ function ProjectReposContent({
                 className="me-2"
               >
                 {isReconciling ? (
-                  <Spinner as="span" size="sm" animation="border" className="me-1" />
+                  <Spinner
+                    as="span"
+                    size="sm"
+                    animation="border"
+                    className="me-1"
+                  />
                 ) : null}
                 Reconcile
               </Button>
@@ -392,7 +461,12 @@ function ProjectReposContent({
                 className="me-2"
               >
                 {isSyncingAccess ? (
-                  <Spinner as="span" size="sm" animation="border" className="me-1" />
+                  <Spinner
+                    as="span"
+                    size="sm"
+                    animation="border"
+                    className="me-1"
+                  />
                 ) : null}
                 Sync GitHub Access
               </Button>
@@ -402,7 +476,12 @@ function ProjectReposContent({
                 disabled={isExporting || statusLoading}
               >
                 {isExporting ? (
-                  <Spinner as="span" size="sm" animation="border" className="me-1" />
+                  <Spinner
+                    as="span"
+                    size="sm"
+                    animation="border"
+                    className="me-1"
+                  />
                 ) : null}
                 Export CSV
               </Button>
@@ -439,12 +518,19 @@ function ProjectReposContent({
 
             {statusLoading && !status && (
               <div className="text-muted">
-                <Spinner as="span" size="sm" animation="border" className="me-2" />
+                <Spinner
+                  as="span"
+                  size="sm"
+                  animation="border"
+                  className="me-2"
+                />
                 Loading status...
               </div>
             )}
             {statusError && (
-              <Alert variant="danger">Failed to load status: {statusError}</Alert>
+              <Alert variant="danger">
+                Failed to load status: {statusError}
+              </Alert>
             )}
 
             {status && (
@@ -461,7 +547,9 @@ function ProjectReposContent({
                             giving a student back a repo they've already used
                             (e.g. after a partner change), or fixing a gap by
                             hand. If a netId already has a different active
-                            assignment, it is released first. GitHub access is
+                            assignment, it is released first. If the target repo
+                            is held by someone else, you'll be offered to
+                            release them or include them. GitHub access is
                             granted immediately for just these netIds.
                           </p>
                           <Row className="g-2 align-items-end">
@@ -493,7 +581,7 @@ function ProjectReposContent({
                             <Col md={3}>
                               <Button
                                 variant="primary"
-                                onClick={handleAssign}
+                                onClick={() => handleAssign()}
                                 disabled={isAssigning}
                                 className="w-100"
                               >
@@ -509,6 +597,54 @@ function ProjectReposContent({
                               </Button>
                             </Col>
                           </Row>
+                          {assignConflictBlockers.length > 0 && (
+                            <Alert variant="warning" className="mt-3 mb-0">
+                              <div className="mb-2">
+                                <strong>{assignRepoNameInput.trim()}</strong> is
+                                actively assigned to{" "}
+                                <strong>
+                                  {assignConflictBlockers.join(", ")}
+                                </strong>
+                                . To assign{" "}
+                                {assignNetIdsInput.trim() ||
+                                  "the entered netId(s)"}
+                                , either release the current holder(s) or
+                                include them in this assignment.
+                              </div>
+                              <div className="d-flex gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="warning"
+                                  disabled={isAssigning}
+                                  onClick={() =>
+                                    handleAssign({ displaceBlockers: true })
+                                  }
+                                >
+                                  Release them &amp; assign
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline-primary"
+                                  disabled={isAssigning}
+                                  onClick={() =>
+                                    handleAssign({
+                                      includeBlockers: assignConflictBlockers,
+                                    })
+                                  }
+                                >
+                                  Include them &amp; assign
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="link"
+                                  disabled={isAssigning}
+                                  onClick={() => setAssignConflictBlockers([])}
+                                >
+                                  Dismiss
+                                </Button>
+                              </div>
+                            </Alert>
+                          )}
                         </Card.Body>
                       </Card>
                     </Col>
@@ -591,7 +727,9 @@ function ProjectReposContent({
                                   <td>{r.repoName}</td>
                                   <td>{r.assignedNetIds.join(", ")}</td>
                                   <td>
-                                    <small className="text-muted">{r.reason}</small>
+                                    <small className="text-muted">
+                                      {r.reason}
+                                    </small>
                                   </td>
                                   {isAdmin && (
                                     <td>
@@ -599,7 +737,9 @@ function ProjectReposContent({
                                         <Button
                                           variant="outline-success"
                                           size="sm"
-                                          onClick={() => setReclaimTarget(r.repoName)}
+                                          onClick={() =>
+                                            setReclaimTarget(r.repoName)
+                                          }
                                         >
                                           Reclaim
                                         </Button>
@@ -607,7 +747,9 @@ function ProjectReposContent({
                                         <Button
                                           variant="outline-danger"
                                           size="sm"
-                                          onClick={() => setReleaseTarget(r.repoName)}
+                                          onClick={() =>
+                                            setReleaseTarget(r.repoName)
+                                          }
                                         >
                                           Release
                                         </Button>
@@ -647,7 +789,9 @@ function ProjectReposContent({
                                     key={m.netId}
                                   >
                                     {m.netId}
-                                    {m.repoName ? ` → ${m.repoName}` : " → (none)"}
+                                    {m.repoName
+                                      ? ` → ${m.repoName}`
+                                      : " → (none)"}
                                   </Badge>
                                 ))}
                               </div>
@@ -689,7 +833,9 @@ function ProjectReposContent({
                               {status.gaps.map((g) => (
                                 <tr key={g.partnerGroupId}>
                                   <td>{g.partnerGroupId}</td>
-                                  <td>{g.members.map((m) => m.netId).join(", ")}</td>
+                                  <td>
+                                    {g.members.map((m) => m.netId).join(", ")}
+                                  </td>
                                   {isAdmin && (
                                     <td>
                                       <Button
@@ -697,7 +843,9 @@ function ProjectReposContent({
                                         size="sm"
                                         onClick={() =>
                                           setAssignNetIdsInput(
-                                            g.members.map((m) => m.netId).join(", "),
+                                            g.members
+                                              .map((m) => m.netId)
+                                              .join(", "),
                                           )
                                         }
                                       >
@@ -724,7 +872,9 @@ function ProjectReposContent({
                       </Card.Header>
                       <Card.Body>
                         {status.assignments.length === 0 ? (
-                          <p className="text-muted mb-0">No active assignments.</p>
+                          <p className="text-muted mb-0">
+                            No active assignments.
+                          </p>
                         ) : (
                           <Table
                             responsive
@@ -749,10 +899,14 @@ function ProjectReposContent({
                                   <td>{a.netId}</td>
                                   <td>{a.repoName}</td>
                                   <td>{a.partnerGroupId ?? "—"}</td>
-                                  <td>{new Date(a.assignedAt).toLocaleString()}</td>
+                                  <td>
+                                    {new Date(a.assignedAt).toLocaleString()}
+                                  </td>
                                   <td>
                                     {a.githubAccessConfirmed ? (
-                                      <Badge bg="success">Access confirmed</Badge>
+                                      <Badge bg="success">
+                                        Access confirmed
+                                      </Badge>
                                     ) : (
                                       <Badge bg="warning" text="dark">
                                         Access may be pending
@@ -797,9 +951,8 @@ function ProjectReposContent({
             <>
               This permanently deletes the released assignment rows for this
               repo and returns it to the free pool. The audit trail is
-              preserved. Broadway cannot verify or wipe the repo's actual
-              GitHub content — remove collaborators from GitHub manually if
-              needed.
+              preserved. Broadway cannot verify or wipe the repo's actual GitHub
+              content — remove collaborators from GitHub manually if needed.
             </>
           }
           confirmText="Reclaim"
@@ -843,7 +996,10 @@ export default function ProjectReposPage(): JSX.Element {
     () => courseRoles.includes(Role.ADMIN) || courseRoles.includes(Role.STAFF),
     [courseRoles],
   );
-  const isAdmin = useMemo(() => courseRoles.includes(Role.ADMIN), [courseRoles]);
+  const isAdmin = useMemo(
+    () => courseRoles.includes(Role.ADMIN),
+    [courseRoles],
+  );
 
   useEffect(() => {
     if (!user) return;
@@ -876,7 +1032,9 @@ export default function ProjectReposPage(): JSX.Element {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
+    <div
+      style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}
+    >
       <ErrorBoundary>
         <Suspense fallback={<LoadingScreen />}>
           <ProjectReposContent

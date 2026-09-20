@@ -12,7 +12,10 @@ import {
   reconcileProjectRepoAssignments,
   manualAssignRepo,
 } from "../functions/projectRepos.js";
-import { addRepoCollaborator } from "../functions/github.js";
+import {
+  addRepoCollaborator,
+  removeRepoCollaborator,
+} from "../functions/github.js";
 
 const courseParams = z.object({ courseId: z.string().min(1) });
 
@@ -71,6 +74,7 @@ const releaseBody = z.object({ repoName: z.string().min(1) });
 const assignBody = z.object({
   netIds: z.array(z.string().min(1)).min(1),
   repoName: z.string().min(1),
+  displaceBlockers: z.boolean().optional().default(false),
 });
 
 const assignResultEntry = z.object({
@@ -83,6 +87,8 @@ const assignResultEntry = z.object({
 
 const assignResponse = z.object({
   results: z.array(assignResultEntry),
+  releasedBlockers: z.array(z.string()),
+  accessWarnings: z.array(z.string()),
 });
 
 const releaseResponse = z.object({
@@ -653,10 +659,10 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
     },
     async (request, reply) => {
       const { courseId, projectKey } = request.params;
-      const { netIds, repoName } = request.body;
+      const { netIds, repoName, displaceBlockers } = request.body;
       const actorNetId = sessionNetId(request);
 
-      const assignResults = await fastify.prismaClient
+      const { results, releasedBlockers } = await fastify.prismaClient
         .$transaction((tx) =>
           manualAssignRepo({
             tx,
@@ -665,6 +671,7 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
             netIds,
             repoName,
             actorNetId,
+            displaceBlockers,
           }),
         )
         .catch((e) => {
@@ -682,18 +689,23 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
         where: { id: courseId },
         select: { githubOrg: true, githubToken: true },
       });
-      const mappings = await fastify.prismaClient.githubUsernameMapping.findMany(
-        { where: { courseId, netId: { in: netIds } }, select: { netId: true, githubUsername: true } },
-      );
+      const mappings =
+        await fastify.prismaClient.githubUsernameMapping.findMany({
+          where: {
+            courseId,
+            netId: { in: [...netIds, ...releasedBlockers] },
+          },
+          select: { netId: true, githubUsername: true },
+        });
       const usernameByNetId = new Map(
         mappings.map((m) => [m.netId, m.githubUsername]),
       );
 
-      const results: z.infer<typeof assignResultEntry>[] = [];
-      for (const r of assignResults) {
+      const grantResults: z.infer<typeof assignResultEntry>[] = [];
+      for (const r of results) {
         const username = usernameByNetId.get(r.netId);
         if (!username) {
-          results.push({
+          grantResults.push({
             ...r,
             githubAccessGranted: false,
             githubAccessError: "No GitHub username mapping found.",
@@ -718,7 +730,7 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
             },
             data: { githubAccessConfirmed: true },
           });
-          results.push({
+          grantResults.push({
             ...r,
             githubAccessGranted: true,
             githubAccessError: null,
@@ -728,7 +740,7 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
             { err: e.message, netId: r.netId, repoName: r.repoName },
             "Failed to grant GitHub access after manual assign",
           );
-          results.push({
+          grantResults.push({
             ...r,
             githubAccessGranted: false,
             githubAccessError: e.message || "Unknown error",
@@ -736,12 +748,50 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
         }
       }
 
+      // Best-effort: strip GitHub access from anyone we just released, so
+      // displaced holders never keep push rights to a repo they lost.
+      const accessWarnings: string[] = [];
+      for (const netId of releasedBlockers) {
+        const username = usernameByNetId.get(netId);
+        if (!username) {
+          accessWarnings.push(
+            `${netId}: no GitHub username mapping — remove manually if needed`,
+          );
+          continue;
+        }
+        try {
+          await removeRepoCollaborator({
+            githubToken: course.githubToken,
+            orgName: course.githubOrg,
+            repoName,
+            username,
+            logger: request.log,
+          });
+        } catch (e: any) {
+          accessWarnings.push(`${netId} (${username}): ${e.message}`);
+        }
+      }
+
       request.log.info(
-        { courseId, projectKey, netIds, repoName, actorNetId, results },
+        {
+          courseId,
+          projectKey,
+          netIds,
+          repoName,
+          actorNetId,
+          displaceBlockers,
+          releasedBlockers,
+          accessWarnings,
+          results: grantResults,
+        },
         "Manual project repo assignment",
       );
 
-      return reply.status(200).send({ results });
+      return reply.status(200).send({
+        results: grantResults,
+        releasedBlockers,
+        accessWarnings,
+      });
     },
   );
 
