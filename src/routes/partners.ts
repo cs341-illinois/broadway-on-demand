@@ -16,6 +16,7 @@ import {
   archiveAndCreateGroups,
   generateRandomGroups,
   getGroupForStudent,
+  getPreviousPartnerPairs,
   getSectionRoundHistory,
   getStudentPartnerHistory,
   hasActiveGroups,
@@ -149,6 +150,12 @@ const partnerRoutes: FastifyPluginAsync = async (fastify, _options) => {
         });
       }
 
+      const previousPairs = await getPreviousPartnerPairs({
+        tx: fastify.prismaClient,
+        courseId,
+        labSection,
+        roundNumber,
+      });
       const created = await fastify.prismaClient
         .$transaction((tx) =>
           archiveAndCreateGroups({
@@ -156,7 +163,7 @@ const partnerRoutes: FastifyPluginAsync = async (fastify, _options) => {
             courseId,
             labSection,
             roundNumber,
-            groupsOfNetIds: generateRandomGroups(sectionNetIds),
+            groupsOfNetIds: generateRandomGroups(sectionNetIds, previousPairs),
             actorNetId,
           }),
         )
@@ -199,6 +206,12 @@ const partnerRoutes: FastifyPluginAsync = async (fastify, _options) => {
         });
       }
 
+      const previousPairs = await getPreviousPartnerPairs({
+        tx: fastify.prismaClient,
+        courseId,
+        labSection,
+        roundNumber,
+      });
       const created = await fastify.prismaClient
         .$transaction((tx) =>
           archiveAndCreateGroups({
@@ -206,7 +219,7 @@ const partnerRoutes: FastifyPluginAsync = async (fastify, _options) => {
             courseId,
             labSection,
             roundNumber,
-            groupsOfNetIds: generateRandomGroups(sectionNetIds),
+            groupsOfNetIds: generateRandomGroups(sectionNetIds, previousPairs),
             actorNetId,
           }),
         )

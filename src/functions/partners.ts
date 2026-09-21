@@ -16,22 +16,68 @@ function shuffle<T>(items: T[]): T[] {
 }
 
 /**
+ * Canonical key for an (unordered) pair of students, used to track prior
+ * partnerships when generating groups.
+ */
+export function pairKey(netIdA: string, netIdB: string): string {
+  return [netIdA, netIdB].sort().join("|");
+}
+
+function countRepeatedPairs(
+  groups: string[][],
+  previousPairs: Set<string>,
+): number {
+  let conflicts = 0;
+  for (const group of groups) {
+    for (let i = 0; i < group.length; i++) {
+      for (let j = i + 1; j < group.length; j++) {
+        if (previousPairs.has(pairKey(group[i], group[j]))) conflicts++;
+      }
+    }
+  }
+  return conflicts;
+}
+
+/**
  * Randomly splits netIds into groups of 2, folding a leftover single
  * (odd-sized input) into the last group to make one group of 3 instead of
  * leaving anyone ungrouped.
+ *
+ * `previousPairs` (see getPreviousPartnerPairs) biases the shuffle away from
+ * repeating partnerships: many random arrangements are tried and the one with
+ * the fewest repeated pairs wins. Best-effort only - when every arrangement
+ * must repeat someone (e.g. a previous trio in a 3-student section), the
+ * minimum-repeat arrangement is returned.
  */
-export function generateRandomGroups(netIds: string[]): string[][] {
-  const shuffled = shuffle(netIds);
-  const groups: string[][] = [];
-  for (let i = 0; i < shuffled.length; i += 2) {
-    groups.push(shuffled.slice(i, i + 2));
+export function generateRandomGroups(
+  netIds: string[],
+  previousPairs: Set<string> = new Set(),
+): string[][] {
+  const buildArrangement = (): string[][] => {
+    const shuffled = shuffle(netIds);
+    const groups: string[][] = [];
+    for (let i = 0; i < shuffled.length; i += 2) {
+      groups.push(shuffled.slice(i, i + 2));
+    }
+    const last = groups[groups.length - 1];
+    if (last && last.length === 1 && groups.length > 1) {
+      groups[groups.length - 2].push(last[0]);
+      groups.pop();
+    }
+    return groups;
+  };
+
+  let best = buildArrangement();
+  let bestConflicts = countRepeatedPairs(best, previousPairs);
+  for (let attempt = 0; attempt < 200 && bestConflicts > 0; attempt++) {
+    const candidate = buildArrangement();
+    const conflicts = countRepeatedPairs(candidate, previousPairs);
+    if (conflicts < bestConflicts) {
+      best = candidate;
+      bestConflicts = conflicts;
+    }
   }
-  const last = groups[groups.length - 1];
-  if (last && last.length === 1 && groups.length > 1) {
-    groups[groups.length - 2].push(last[0]);
-    groups.pop();
-  }
-  return groups;
+  return best;
 }
 
 /**
@@ -133,6 +179,49 @@ export async function archiveAndCreateGroups({
   });
 
   return [...preservedFull, ...created];
+}
+
+/**
+ * Pairs of students (as pairKey strings) who were grouped together in this
+ * course+section in an EARLIER round (roundNumber < roundNumber), including
+ * archived groups. Feeds generateRandomGroups so generation avoids repeat
+ * partnerships. The current round's own groups (active or archived) are
+ * deliberately excluded.
+ */
+export async function getPreviousPartnerPairs({
+  tx,
+  courseId,
+  labSection,
+  roundNumber,
+}: {
+  tx: Tx;
+  courseId: string;
+  labSection: string;
+  roundNumber: number;
+}): Promise<Set<string>> {
+  const memberships = await tx.partnerGroupMember.findMany({
+    where: {
+      courseId,
+      roundNumber: { lt: roundNumber },
+      PartnerGroup: { labSection },
+    },
+    select: { netId: true, partnerGroupId: true },
+  });
+  const membersByGroup = new Map<string, string[]>();
+  for (const m of memberships) {
+    const list = membersByGroup.get(m.partnerGroupId) ?? [];
+    list.push(m.netId);
+    membersByGroup.set(m.partnerGroupId, list);
+  }
+  const pairs = new Set<string>();
+  for (const members of membersByGroup.values()) {
+    for (let i = 0; i < members.length; i++) {
+      for (let j = i + 1; j < members.length; j++) {
+        pairs.add(pairKey(members[i], members[j]));
+      }
+    }
+  }
+  return pairs;
 }
 
 /**
