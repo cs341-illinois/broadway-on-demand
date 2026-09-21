@@ -84,9 +84,15 @@ interface ProjectReposPageData {
 }
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const { headers, ...rest } = init ?? {};
+  // Only send a JSON content-type when there is a body - Fastify rejects an
+  // empty body with a JSON content-type (FST_ERR_CTP_EMPTY_JSON_BODY).
   const response = await fetch(formulateUrl(url), {
-    headers: { "Content-Type": "application/json" },
-    ...init,
+    ...rest,
+    headers: {
+      ...(rest.body !== undefined ? { "Content-Type": "application/json" } : {}),
+      ...headers,
+    },
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
