@@ -22,14 +22,22 @@ async function main() {
       "Usage: npx tsx src/scripts/importProjectRepoPool.ts <courseId> <projectKey> <repoProjectName> <count>",
     );
     console.error(
+      "Usage: npx tsx src/scripts/importProjectRepoPool.ts <courseId> <projectKey> <repoProjectName> <start>-<end>",
+    );
+    console.error(
       "Example: npx tsx src/scripts/importProjectRepoPool.ts cs341-fa26 project1 project-1 200",
+    );
+    console.error(
+      "Example: npx tsx src/scripts/importProjectRepoPool.ts cs341-fa26 project1 project-1 201-250",
     );
     process.exit(1);
   }
 
-  const count = parseInt(countRaw, 10);
-  if (!Number.isFinite(count) || count < 1) {
-    throw new Error("count must be a positive integer.");
+  const [startRaw, endRaw] = countRaw.split("-");
+  const start = startRaw ? parseInt(startRaw, 10) : 1;
+  const end = endRaw ? parseInt(endRaw, 10) : start + parseInt(countRaw, 10) - 1;
+  if (!Number.isFinite(start) || start < 1 || !Number.isFinite(end) || end < start) {
+    throw new Error("count must be a positive integer or range (e.g., 201-250).");
   }
 
   const prismaClient = new PrismaClient();
@@ -42,9 +50,21 @@ async function main() {
       throw new Error(`No course with id '${courseId}' exists.`);
     });
 
+  // Pool import only makes sense for POOL-mode projects: on-demand projects
+  // get their repos created (and pool rows inserted) by the reconciler.
+  const config = await prismaClient.projectRepoConfig.findUnique({
+    where: { courseId_projectKey: { courseId, projectKey } },
+    select: { repoMode: true },
+  });
+  if (config?.repoMode === "ON_DEMAND") {
+    throw new Error(
+      `Project '${projectKey}' is ON_DEMAND - repos are allocated and provisioned automatically; pool import is not applicable.`,
+    );
+  }
+
   const prefix = course.githubRepoPrefix;
   const repoNames: string[] = [];
-  for (let i = 1; i <= count; i++) {
+  for (let i = start; i <= end; i++) {
     repoNames.push(`${prefix}_.${repoProjectName}_.team-${pad3(i)}`);
   }
 
@@ -87,7 +107,15 @@ async function main() {
     let sortOrder = (maxRow._max.sortOrder ?? -1) + 1;
     for (const repoName of toInsert) {
       await tx.projectRepoPool.create({
-        data: { courseId, projectKey, repoName, sortOrder },
+        data: {
+          courseId,
+          projectKey,
+          repoName,
+          sortOrder,
+          // Imported names are assumed to already exist on GitHub (that has
+          // always been the contract of out-of-band pool creation).
+          provisionedAt: new Date(),
+        },
       });
       sortOrder += 1;
     }

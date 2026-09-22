@@ -391,12 +391,24 @@ export async function getGradingEligibility({
     return { eligible: false };
   }
   if (category === Category.PROJECT && projectKey != null) {
+    // On-demand projects: the referenced repo may have been allocated in the
+    // DB but not yet created on GitHub (provisionedAt null) - block grading
+    // until it exists. Pool-mode projects are unaffected (all pool rows are
+    // provisioned by import).
+    const repoConfig = await tx.projectRepoConfig.findUnique({
+      where: { courseId_projectKey: { courseId, projectKey } },
+      select: { repoMode: true },
+    });
+    const requireProvisioned = repoConfig?.repoMode === "ON_DEMAND";
     const projectRepoAssignment = await tx.projectRepoAssignment.findFirst({
       where: {
         courseId,
         projectKey,
         netId,
         releasedAt: null,
+        ...(requireProvisioned
+          ? { ProjectRepoPool: { is: { provisionedAt: { not: null } } } }
+          : {}),
       },
       select: { id: true },
     });

@@ -20,6 +20,7 @@ export type StartGradingRunInputs = {
   logger: FastifyBaseLogger;
   expectedCommitHash?: string;
   repoMap?: Record<string, string>;
+  repoOrg?: string;
 };
 
 const dateFormatRegex = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
@@ -42,6 +43,9 @@ export const jenkinsPayloadSchema = z.object({
   JOB_PRIORITY: z.number().min(1).max(5),
   EXPECTED_COMMIT_HASH: z.string().default(""),
   REPO_MAP: z.string().default(""),
+  // GitHub org the REPO_MAP repos live in (PROJECT runs only; empty for labs,
+  // whose per-student repos resolve via the pipeline's legacy ORG_ID).
+  REPO_ORG: z.string().default(""),
 });
 
 export type JenkinsPayload = z.infer<typeof jenkinsPayloadSchema>;
@@ -55,6 +59,7 @@ type GetJenkinsParamsInputs = {
   logger: FastifyBaseLogger;
   expectedCommitHash?: string;
   repoMap?: Record<string, string>;
+  repoOrg?: string;
 };
 
 const getJobPriority = (jobType: JobType) => {
@@ -71,7 +76,7 @@ const getJobPriority = (jobType: JobType) => {
       return 2;
   }
 };
-const getJenkinsParams = ({
+export const getJenkinsParams = ({
   courseId,
   netIds,
   agDateTime,
@@ -80,6 +85,7 @@ const getJenkinsParams = ({
   logger,
   expectedCommitHash,
   repoMap,
+  repoOrg,
 }: GetJenkinsParamsInputs): JenkinsPayload => {
   const proposedPayload = {
     STUDENT_IDS: netIds.join(","),
@@ -98,6 +104,7 @@ const getJenkinsParams = ({
     JOB_PRIORITY: getJobPriority(type),
     EXPECTED_COMMIT_HASH: expectedCommitHash,
     REPO_MAP: repoMap ? JSON.stringify(repoMap) : "",
+    REPO_ORG: repoOrg ?? "",
   };
   const { data, success, error } =
     jenkinsPayloadSchema.safeParse(proposedPayload);
@@ -122,6 +129,7 @@ export async function startGradingRun({
   jenkinsToken,
   expectedCommitHash,
   repoMap,
+  repoOrg,
   logger,
 }: StartGradingRunInputs) {
   gradingRunId = gradingRunId || uuid4();
@@ -138,6 +146,7 @@ export async function startGradingRun({
     logger,
     expectedCommitHash,
     repoMap,
+    repoOrg,
   });
   const url = `${jenkinsJobUrl}?${new URLSearchParams(JSON.parse(JSON.stringify(params))).toString()}`;
   const result = await fetch(url, {

@@ -21,6 +21,9 @@ model Course {
   githubOrg          String
   githubRepoPrefix   String
   githubToken        String
+  // GitHub team slug granted (maintain) access to on-demand project repos.
+  // Null falls back to the legacy `${githubRepoPrefix}_staff-team` convention.
+  staffTeamSlug      String?
   name               String
   jenkinsToken       String
   feedbackBranchName String
@@ -55,6 +58,7 @@ model Course {
   GithubUsernameMapping GithubUsernameMapping[]
   ProjectRepoPool       ProjectRepoPool[]
   ProjectRepoAssignment ProjectRepoAssignment[]
+  ProjectRepoConfig     ProjectRepoConfig[]
   GradeAuditLog         GradeAuditLog[]
 }
 
@@ -373,6 +377,9 @@ model ProjectRepoPool {
   repoName   String
   sortOrder  Int
   createdAt  DateTime @default(now())
+  // Null = the repo has not been created on GitHub yet (on-demand projects
+  // only; pool imports set it immediately since those repos exist out-of-band).
+  provisionedAt DateTime?
 
   Course      Course                @relation(fields: [courseId], references: [id], onDelete: Cascade)
   assignments ProjectRepoAssignment[]
@@ -380,6 +387,29 @@ model ProjectRepoPool {
   @@unique([courseId, projectKey, repoName])
   @@unique([courseId, projectKey, sortOrder])
   @@index([courseId, projectKey, sortOrder])
+}
+
+// Per-project provisioning configuration. One logical project (identified by
+// projectKey) spans several Assignment rows; this holds the settings once.
+model ProjectRepoConfig {
+  courseId        String
+  projectKey      String
+  repoMode        ProjectRepoMode @default(POOL)
+  // Used to build on-demand repo names: {githubRepoPrefix}_.{repoProjectName}_.team-{NNN}
+  repoProjectName String?
+  // GitHub org where this project's repos live (on-demand creation, cloning,
+  // collaborator sync, student-facing URLs). Null falls back to
+  // Course.githubOrg - which stays correct for legacy POOL projects.
+  githubOrg       String?
+
+  Course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@id([courseId, projectKey])
+}
+
+enum ProjectRepoMode {
+  POOL
+  ON_DEMAND
 }
 
 model ProjectRepoAssignment {

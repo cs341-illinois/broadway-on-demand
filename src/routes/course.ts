@@ -38,6 +38,7 @@ import {
 } from "../errors/index.js";
 import { getCourseRoles } from "../functions/userData.js";
 import { startGradingRun } from "../functions/gradeAssignment.js";
+import { getProjectRepoOrg } from "../functions/projectRepos.js";
 import {
   getLatestCommit,
   updateStudentGradesToGithub,
@@ -241,6 +242,20 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
         },
       });
       let repoName = `${githubRepoPrefix}_${netId}`;
+      // Project repos may live in a per-project org (on-demand projects in
+      // the dedicated coursework org); lab per-student repos stay in the
+      // course's legacy org.
+      const projectOrgConfigs =
+        await fastify.prismaClient.projectRepoConfig.findMany({
+          where: { courseId, githubOrg: { not: null } },
+          select: { projectKey: true, githubOrg: true },
+        });
+      const orgByProjectKey = new Map(
+        projectOrgConfigs.map((c) => [c.projectKey, c.githubOrg as string]),
+      );
+      const orgForKey = (projectKey: string | null | undefined) =>
+        (projectKey && orgByProjectKey.get(projectKey)) || githubOrg;
+      let repoOrg = githubOrg;
       let projectRepo:
         | { repoName: string; repoUrl: string; accessPending: boolean }
         | null
@@ -261,9 +276,10 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
           });
         if (projectRepoAssignment) {
           repoName = projectRepoAssignment.repoName;
+          repoOrg = orgForKey(targetAssignment.projectKey);
           projectRepo = {
             repoName: projectRepoAssignment.repoName,
-            repoUrl: `https://github.com/${githubOrg}/${projectRepoAssignment.repoName}`,
+            repoUrl: `https://github.com/${repoOrg}/${projectRepoAssignment.repoName}`,
             accessPending: !projectRepoAssignment.githubAccessConfirmed,
           };
         } else {
@@ -287,7 +303,7 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
         });
       const previousProjectRepos = previousRepoAssignments.map((r) => ({
         repoName: r.repoName,
-        repoUrl: `https://github.com/${githubOrg}/${r.repoName}`,
+        repoUrl: `https://github.com/${orgForKey(r.projectKey)}/${r.repoName}`,
         accessPending: !r.githubAccessConfirmed,
         projectKey: r.projectKey,
       }));
@@ -302,7 +318,7 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
       } else {
         latestCommit = getLatestCommit({
           githubToken,
-          orgName: githubOrg,
+          orgName: repoOrg,
           repoName,
           logger: request.log,
         });
@@ -314,7 +330,7 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
       });
 
       const feedbackFolderName = jenkinsPipelineName || assignmentId;
-      const feedbackBaseUrl = `https://github.com/${githubOrg}/${repoName}/tree/${feedbackBranchName}/${feedbackFolderName}`;
+      const feedbackBaseUrl = `https://github.com/${repoOrg}/${repoName}/tree/${feedbackBranchName}/${feedbackFolderName}`;
       const { name: assignmentName, openAt } = targetAssignment;
       const isStaff =
         courseRoles.includes(Role.ADMIN) || courseRoles.includes(Role.STAFF);
@@ -828,6 +844,7 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
       let projectGradeLockKey: string | null = null;
       let projectGradeLockAcquired = false;
       let projectRepoName: string | null = null;
+      let projectRepoOrg: string | null = null;
       if (
         assignmentRow.category === Category.PROJECT &&
         assignmentRow.projectKey != null
@@ -846,6 +863,11 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
           throw new ValidationError({ message: "No project repo assigned" });
         }
         projectRepoName = projectRepoAssignment.repoName;
+        projectRepoOrg = await getProjectRepoOrg({
+          tx: fastify.prismaClient,
+          courseId,
+          projectKey: assignmentRow.projectKey,
+        });
         projectGradeLockKey = `projectrepo:grade:${courseId}:${projectRepoAssignment.repoName}`;
         projectGradeLockTs = new Date().getTime();
         const lockResponse = await fastify.redisClient.set(
@@ -862,7 +884,7 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
         projectGradeLockAcquired = true;
         const serverCommit = await getLatestCommit({
           githubToken,
-          orgName: githubOrg,
+          orgName: projectRepoOrg ?? githubOrg,
           repoName: projectRepoAssignment.repoName,
           logger: fastify.log,
         });
@@ -907,6 +929,7 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
                 gradingRunId: result.id,
                 expectedCommitHash,
                 repoMap: projectRepoName ? { [netId]: projectRepoName } : undefined,
+                repoOrg: projectRepoOrg ?? undefined,
                 logger: fastify.log,
               });
               if (queueUrl) {
@@ -991,6 +1014,7 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
                   gradingRunId: result.id,
                   expectedCommitHash,
                   repoMap: projectRepoName ? { [netId]: projectRepoName } : undefined,
+                  repoOrg: projectRepoOrg ?? undefined,
                   logger: fastify.log,
                 });
                 if (queueUrl) {

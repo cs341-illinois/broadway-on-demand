@@ -517,6 +517,120 @@ export async function removeRepoCollaborator({
   return { removed: res.status === 204 };
 }
 
+/**
+ * Creates a private repo in the org with an initial commit (auto_init), for
+ * the on-demand project-repo flow. Idempotent: GitHub's 422 "name already
+ * exists" is treated as success ({ alreadyExisted: true }) so provisioning
+ * can safely retry half-completed repos.
+ *
+ * Privacy belt-and-suspenders: the create call pins private: true (the API
+ * default is false!), the 201 response is verified to actually be private,
+ * and a public result is remediated via PATCH before failing loudly.
+ */
+export async function createOrgRepo({
+  githubToken,
+  orgName,
+  repoName,
+  logger,
+}: {
+  githubToken: string;
+  orgName: string;
+  repoName: string;
+  logger: FastifyBaseLogger;
+}): Promise<{ alreadyExisted: boolean }> {
+  const headers = {
+    Authorization: `Bearer ${githubToken}`,
+    Accept: "application/vnd.github+json",
+    "Content-Type": "application/json",
+  };
+  let res = await fetch(`https://api.github.com/orgs/${orgName}/repos`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      name: repoName,
+      private: true,
+      auto_init: true,
+      has_issues: false,
+      has_projects: false,
+      has_wiki: false,
+    }),
+  });
+  if (res.status === 422) {
+    // Name already exists on GitHub - safe to treat as success (idempotent retry).
+    return { alreadyExisted: true };
+  }
+  if (res.status !== 201) {
+    const body = await res.text().catch(() => "");
+    logger.error(
+      { orgName, repoName, status: res.status, body },
+      "Failed to create GitHub repo",
+    );
+    throw new Error(
+      `Failed to create repo ${orgName}/${repoName}: HTTP ${res.status}`,
+    );
+  }
+  const created = (await res.json()) as { private?: boolean };
+  if (created.private !== true) {
+    // Should never happen since we passed private: true - remediate immediately.
+    logger.error({ orgName, repoName }, "Created repo is not private; patching");
+    const patchRes = await fetch(
+      `https://api.github.com/repos/${orgName}/${repoName}`,
+      { method: "PATCH", headers, body: JSON.stringify({ private: true }) },
+    );
+    if (patchRes.status !== 200) {
+      throw new Error(
+        `Repo ${orgName}/${repoName} was created PUBLIC and could not be patched private (HTTP ${patchRes.status}) - fix manually immediately.`,
+      );
+    }
+  }
+  return { alreadyExisted: false };
+}
+
+/**
+ * Grants a GitHub team access to a repo (PUT /orgs/{org}/teams/{slug}/repos).
+ * Requires the token's user to have admin on the repo (the repo creator does)
+ * and to be able to see the team (org owners see secret teams too).
+ */
+export async function addTeamRepoAccess({
+  githubToken,
+  orgName,
+  teamSlug,
+  repoName,
+  permission = "maintain",
+  logger,
+}: {
+  githubToken: string;
+  orgName: string;
+  teamSlug: string;
+  repoName: string;
+  permission?: string;
+  logger: FastifyBaseLogger;
+}): Promise<void> {
+  const res = await fetch(
+    `https://api.github.com/orgs/${orgName}/teams/${teamSlug}/repos/${orgName}/${repoName}`,
+    {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${githubToken}`,
+        Accept: "application/vnd.github+json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ permission }),
+    },
+  );
+  if (res.status !== 204) {
+    const body = await res.text().catch(() => "");
+    logger.error(
+      { orgName, teamSlug, repoName, status: res.status, body },
+      "Failed to grant team repo access",
+    );
+    throw new Error(
+      `Failed to grant team '${teamSlug}' access to ${repoName}: HTTP ${res.status}`,
+    );
+  }
+}
+
+
 export async function getLatestCommit({
   githubToken,
   orgName,

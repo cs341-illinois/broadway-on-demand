@@ -3,16 +3,28 @@ import { type RedisClientType } from "redis";
 import { type FastifyBaseLogger } from "fastify";
 import { ConflictError, ValidationError } from "../errors/index.js";
 import { getGroupForStudent } from "./partners.js";
+import { createOrgRepo, addTeamRepoAccess } from "./github.js";
 
 type Tx = Prisma.TransactionClient;
 
 const SYSTEM_ACTOR = "system-reconcile";
 const REDIS_LOCK_PX = 30000;
+const ON_DEMAND_ACTOR = "system-provision";
+// GitHub API throttle between provisioning calls (create repo, team grant).
+const PROVISION_THROTTLE_MS = 300;
+
+const TEAM_REPO_RE = /\.team-(\d+)$/;
 
 export type ReconcileClaimed = {
   groupId: string;
   repoName: string;
   netIds: string[];
+};
+
+export type ReconcileProvisionPending = {
+  repoName: string;
+  netIds: string[];
+  staffNetId?: string;
 };
 
 export type ReconcileExtended = {
@@ -46,6 +58,10 @@ export type ReconcileSummary = {
   conflicts: ReconcileConflict[];
   gaps: ReconcileGap[];
   skipped: ReconcileSkipped[];
+  // Pool rows created by this reconcile that still need their GitHub repo
+  // created (on-demand mode only). The provisioner consumes these; rows are
+  // tracked durably via ProjectRepoPool.provisionedAt IS NULL.
+  provisionPending: ReconcileProvisionPending[];
 };
 
 export type ManualAssignResult = {
@@ -60,6 +76,243 @@ export type ManualAssignOutcome = {
 };
 
 type PoolRow = { id: string; repoName: string };
+
+/**
+ * Per-project repo provisioning config. Defaults to the legacy POOL mode when
+ * no config row exists (projects created before on-demand support).
+ */
+export async function getProjectRepoConfig({
+  tx,
+  courseId,
+  projectKey,
+}: {
+  tx: Tx;
+  courseId: string;
+  projectKey: string;
+}): Promise<{
+  repoMode: "POOL" | "ON_DEMAND";
+  repoProjectName: string | null;
+  githubOrg: string | null;
+}> {
+  const row = await tx.projectRepoConfig.findUnique({
+    where: { courseId_projectKey: { courseId, projectKey } },
+    select: { repoMode: true, repoProjectName: true, githubOrg: true },
+  });
+  return {
+    repoMode: row?.repoMode ?? "POOL",
+    repoProjectName: row?.repoProjectName ?? null,
+    githubOrg: row?.githubOrg ?? null,
+  };
+}
+
+/**
+ * The GitHub org this project's repos live in. Per-project override
+ * (ProjectRepoConfig.githubOrg, used by on-demand projects in the dedicated
+ * coursework org) wins; legacy POOL projects fall back to Course.githubOrg.
+ */
+export async function getProjectRepoOrg({
+  tx,
+  courseId,
+  projectKey,
+}: {
+  tx: Tx;
+  courseId: string;
+  projectKey: string;
+}): Promise<string> {
+  const [config, course] = await Promise.all([
+    tx.projectRepoConfig.findUnique({
+      where: { courseId_projectKey: { courseId, projectKey } },
+      select: { githubOrg: true },
+    }),
+    tx.course.findUniqueOrThrow({
+      where: { id: courseId },
+      select: { githubOrg: true },
+    }),
+  ]);
+  return config?.githubOrg ?? course.githubOrg;
+}
+
+/**
+ * The partner round a project's repo assignments reconcile against. A project
+ * spans several Assignment rows sharing one projectKey; they all carry the
+ * same partnerRoundNumber, so the first non-null value wins (round 1 fallback
+ * for projects created without one).
+ */
+export async function getProjectRoundNumber({
+  tx,
+  courseId,
+  projectKey,
+}: {
+  tx: Tx;
+  courseId: string;
+  projectKey: string;
+}): Promise<number> {
+  const rows = await tx.assignment.findMany({
+    where: { courseId, projectKey },
+    select: { partnerRoundNumber: true },
+  });
+  const round = rows.find((r) => r.partnerRoundNumber != null)
+    ?.partnerRoundNumber;
+  return round ?? 1;
+}
+
+/**
+ * The GitHub team granted (maintain) access to on-demand project repos.
+ * Falls back to the legacy `${githubRepoPrefix}_staff-team` slug convention
+ * when no course-level override is set - matching what the collaborator sync
+ * has always preserved.
+ */
+export function getStaffTeamSlug(course: {
+  staffTeamSlug: string | null;
+  githubRepoPrefix: string;
+}): string {
+  return course.staffTeamSlug ?? `${course.githubRepoPrefix}_staff-team`;
+}
+
+/**
+ * Allocates the next unused `team-{NNN}` repo name for an on-demand project,
+ * inserts its ProjectRepoPool row (provisionedAt: null - the GitHub repo does
+ * not exist yet), and returns the name. The NNN sequence continues past any
+ * existing pool rows for the projectKey; cross-projectKey name collisions are
+ * skipped defensively.
+ */
+async function allocateOnDemandRepo(
+  tx: Tx,
+  courseId: string,
+  projectKey: string,
+  repoProjectName: string,
+): Promise<string> {
+  const course = await tx.course.findUniqueOrThrow({
+    where: { id: courseId },
+    select: { githubRepoPrefix: true },
+  });
+  const namePrefix = `${course.githubRepoPrefix}_.${repoProjectName}_.team-`;
+  const rows = await tx.projectRepoPool.findMany({
+    where: { courseId, projectKey, repoName: { startsWith: namePrefix } },
+    select: { repoName: true },
+  });
+  let max = 0;
+  for (const r of rows) {
+    const m = TEAM_REPO_RE.exec(r.repoName);
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  for (let n = max + 1; ; n++) {
+    const repoName = `${namePrefix}${n.toString().padStart(3, "0")}`;
+    const taken = await tx.projectRepoPool.findFirst({
+      where: { courseId, repoName },
+      select: { id: true },
+    });
+    if (!taken) {
+      const maxSort = await tx.projectRepoPool.aggregate({
+        where: { courseId, projectKey },
+        _max: { sortOrder: true },
+      });
+      await tx.projectRepoPool.create({
+        data: {
+          courseId,
+          projectKey,
+          repoName,
+          sortOrder: (maxSort._max.sortOrder ?? -1) + 1,
+          provisionedAt: null,
+        },
+      });
+      return repoName;
+    }
+  }
+}
+
+/**
+ * On-demand pass: ensures every enabled STAFF/ADMIN user has a personal
+ * `.staff-{netId}` repo for the project (pool row + assignment row, so the
+ * repo is neither "free" for group claims nor blocked from test grading runs,
+ * which require an active assignment). Idempotent; runs even when the project
+ * has zero partner groups. Skips staff who already hold an active assignment
+ * for the project (guards the one-active-assignment-per-netId DB invariant
+ * for TAs who are also enrolled students).
+ */
+async function allocateOnDemandStaffRepos({
+  tx,
+  courseId,
+  projectKey,
+  repoProjectName,
+  summary,
+}: {
+  tx: Tx;
+  courseId: string;
+  projectKey: string;
+  repoProjectName: string;
+  summary: ReconcileSummary;
+}): Promise<void> {
+  const course = await tx.course.findUniqueOrThrow({
+    where: { id: courseId },
+    select: { githubRepoPrefix: true },
+  });
+  const staff = await tx.users.findMany({
+    where: {
+      courseId,
+      enabled: true,
+      role: { in: ["STAFF", "ADMIN"] },
+    },
+    select: { netId: true },
+    orderBy: { netId: "asc" },
+  });
+
+  for (const { netId } of staff) {
+    const existing = await tx.projectRepoAssignment.findFirst({
+      where: { courseId, projectKey, netId, releasedAt: null },
+      select: { id: true },
+    });
+    if (existing) continue;
+
+    const repoName = `${course.githubRepoPrefix}_.${repoProjectName}_.staff-${netId}`;
+    const poolRow = await tx.projectRepoPool.findFirst({
+      where: { courseId, projectKey, repoName },
+      select: { id: true },
+    });
+    if (!poolRow) {
+      const maxSort = await tx.projectRepoPool.aggregate({
+        where: { courseId, projectKey },
+        _max: { sortOrder: true },
+      });
+      await tx.projectRepoPool.create({
+        data: {
+          courseId,
+          projectKey,
+          repoName,
+          sortOrder: (maxSort._max.sortOrder ?? -1) + 1,
+          provisionedAt: null,
+        },
+      });
+    }
+    await tx.projectRepoAssignment.create({
+      data: {
+        courseId,
+        projectKey,
+        netId,
+        repoName,
+        assignedBy: ON_DEMAND_ACTOR,
+        sourcePartnerGroupId: null,
+      },
+    });
+    await tx.projectRepoAssignmentAuditLog.create({
+      data: {
+        courseId,
+        projectKey,
+        netId,
+        oldRepoName: null,
+        newRepoName: repoName,
+        action: "claim",
+        actor: ON_DEMAND_ACTOR,
+        reason: `on-demand: staff repo allocation for ${netId}`,
+      },
+    });
+    summary.provisionPending.push({
+      repoName,
+      netIds: [netId],
+      staffNetId: netId,
+    });
+  }
+}
 
 /**
  * Claims the lowest-sortOrder free repo for the project, locking it FOR UPDATE
@@ -243,7 +496,7 @@ export async function manualAssignRepo({
       tx,
       courseId,
       netId,
-      roundNumber: 1,
+      roundNumber: await getProjectRoundNumber({ tx, courseId, projectKey }),
     });
 
     await tx.projectRepoAssignment.create({
@@ -280,7 +533,7 @@ export async function manualAssignRepo({
 }
 
 /**
- * Reconciles project-repo assignments for a projectKey against active Round-1
+ * Reconciles project-repo assignments for a projectKey against the project.s active partner-round
  * groups. Pool exhaustion is reported as a gap (not thrown) so callers can run
  * this fail-soft inside a group-edit transaction.
  */
@@ -300,10 +553,18 @@ export async function reconcileProjectRepoAssignments({
     conflicts: [],
     gaps: [],
     skipped: [],
+    provisionPending: [],
   };
 
+  const config = await getProjectRepoConfig({ tx, courseId, projectKey });
+  const onDemand =
+    config.repoMode === "ON_DEMAND" && config.repoProjectName
+      ? { repoProjectName: config.repoProjectName }
+      : undefined;
+  const roundNumber = await getProjectRoundNumber({ tx, courseId, projectKey });
+
   const activeGroups = await tx.partnerGroup.findMany({
-    where: { courseId, roundNumber: 1, archivedAt: null },
+    where: { courseId, roundNumber, archivedAt: null },
     include: { members: { select: { netId: true } } },
     orderBy: { createdAt: "asc" },
   });
@@ -322,7 +583,7 @@ export async function reconcileProjectRepoAssignments({
       conflictedNetIds.add(netId);
       summary.skipped.push({
         netId,
-        reason: `appears in ${groups.size} active Round-1 groups`,
+        reason: `appears in ${groups.size} active partner-round groups`,
       });
     }
   }
@@ -381,6 +642,7 @@ export async function reconcileProjectRepoAssignments({
         group.id,
         memberNetIds,
         summary,
+        onDemand,
       );
     } else if (allDistinctRepos.length === 1) {
       const repoName = allDistinctRepos[0];
@@ -491,6 +753,7 @@ export async function reconcileProjectRepoAssignments({
             unassignedNetIds,
             netIdToAssignment,
             summary,
+            onDemand,
           );
         }
       } else if (realDistinctRepos.length === 1) {
@@ -543,6 +806,18 @@ export async function reconcileProjectRepoAssignments({
     }
   }
 
+  if (onDemand) {
+    // Own pass so staff repos are allocated even when the project has no
+    // active partner groups yet (e.g. right after project creation).
+    await allocateOnDemandStaffRepos({
+      tx,
+      courseId,
+      projectKey,
+      repoProjectName: onDemand.repoProjectName,
+      summary,
+    });
+  }
+
   return summary;
 }
 
@@ -592,8 +867,21 @@ async function claimForGroup(
   groupId: string,
   memberNetIds: string[],
   summary: ReconcileSummary,
+  onDemand?: { repoProjectName: string },
 ): Promise<void> {
-  const repoName = await claimFreeRepo(tx, courseId, projectKey);
+  let repoName: string | null = null;
+  if (onDemand) {
+    // On-demand mode: allocate a fresh name + pool row; pool exhaustion is
+    // impossible. The GitHub repo itself is created later by the provisioner.
+    repoName = await allocateOnDemandRepo(
+      tx,
+      courseId,
+      projectKey,
+      onDemand.repoProjectName,
+    );
+  } else {
+    repoName = await claimFreeRepo(tx, courseId, projectKey);
+  }
   if (repoName === null) {
     summary.gaps.push({
       groupId,
@@ -607,7 +895,7 @@ async function claimForGroup(
       courseId,
       projectKey,
       netId,
-      repoName,
+      repoName: repoName!,
       assignedBy: SYSTEM_ACTOR,
       sourcePartnerGroupId: groupId,
     })),
@@ -618,13 +906,18 @@ async function claimForGroup(
       projectKey,
       netId,
       oldRepoName: null,
-      newRepoName: repoName,
+      newRepoName: repoName!,
       action: "claim",
       actor: SYSTEM_ACTOR,
-      reason: `reconcile: new claim for group ${groupId}`,
+      reason: onDemand
+        ? `reconcile: on-demand allocation for group ${groupId} (repo not yet provisioned)`
+        : `reconcile: new claim for group ${groupId}`,
     })),
   });
   summary.claimed.push({ groupId, repoName, netIds: memberNetIds });
+  if (onDemand) {
+    summary.provisionPending.push({ repoName, netIds: memberNetIds });
+  }
 }
 
 async function extendRepo(
@@ -671,6 +964,7 @@ async function realignToFreshRepo(
     { repoName: string; sourcePartnerGroupId: string | null }
   >,
   summary: ReconcileSummary,
+  onDemand?: { repoProjectName: string },
 ): Promise<void> {
   const now = new Date();
   if (staleNetIds.length > 0) {
@@ -685,7 +979,17 @@ async function realignToFreshRepo(
     });
   }
   const targetNetIds = [...staleNetIds, ...unassignedNetIds];
-  const repoName = await claimFreeRepo(tx, courseId, projectKey);
+  let repoName: string | null = null;
+  if (onDemand) {
+    repoName = await allocateOnDemandRepo(
+      tx,
+      courseId,
+      projectKey,
+      onDemand.repoProjectName,
+    );
+  } else {
+    repoName = await claimFreeRepo(tx, courseId, projectKey);
+  }
   if (repoName === null) {
     summary.gaps.push({
       groupId,
@@ -713,10 +1017,15 @@ async function realignToFreshRepo(
       newRepoName: repoName,
       action: "realign",
       actor: SYSTEM_ACTOR,
-      reason: `reconcile: stale-suppression realign to fresh repo for group ${groupId}`,
+      reason: onDemand
+        ? `reconcile: stale-suppression realign to fresh on-demand repo for group ${groupId} (repo not yet provisioned)`
+        : `reconcile: stale-suppression realign to fresh repo for group ${groupId}`,
     })),
   });
   summary.claimed.push({ groupId, repoName, netIds: targetNetIds });
+  if (onDemand) {
+    summary.provisionPending.push({ repoName, netIds: targetNetIds });
+  }
 }
 
 async function realignToMajorityRepo(
@@ -860,4 +1169,121 @@ export async function reconcileAllProjectKeysWithLock({
     }
   }
   return summaries;
+}
+
+export type ProvisionResult = {
+  // Repo names whose GitHub repo was confirmed to exist (created now or
+  // already present) and that are now marked provisioned.
+  provisioned: string[];
+  failed: { repoName: string; error: string }[];
+};
+
+/**
+ * Creates GitHub repos for every unprovisioned pool row of an on-demand
+ * project (ProjectRepoPool.provisionedAt IS NULL) and grants the course's
+ * staff team access to each. Intentionally GitHub-free everywhere else:
+ * reconcile only allocates rows, this runs AFTER the allocating transaction
+ * has committed.
+ *
+ * Idempotent/re-entrant (D3): takes the same Redis lock as reconcile, only
+ * touches rows still unprovisioned (conditional UPDATE), treats GitHub's
+ * "already exists" 422 as success, and on any failure leaves provisionedAt
+ * NULL so a later run retries. A retry of a half-provisioned repo skips
+ * creation and only re-attempts the team grant. Student collaborator invites
+ * deliberately stay in the syncAccess flow (D1).
+ */
+export async function provisionPendingRepos({
+  prismaClient,
+  redisClient,
+  courseId,
+  projectKey,
+  logger,
+}: {
+  prismaClient: PrismaClient;
+  redisClient: RedisClientType;
+  courseId: string;
+  projectKey: string;
+  logger: FastifyBaseLogger;
+}): Promise<ProvisionResult> {
+  const result: ProvisionResult = { provisioned: [], failed: [] };
+
+  const config = await prismaClient.projectRepoConfig.findUnique({
+    where: { courseId_projectKey: { courseId, projectKey } },
+    select: { repoMode: true },
+  });
+  if (config?.repoMode !== "ON_DEMAND") {
+    return result;
+  }
+
+  const lockKey = `projectrepo:claim:${courseId}:${projectKey}`;
+  const lockTs = Date.now();
+  const acquired = await redisClient.set(lockKey, lockTs, {
+    NX: true,
+    PX: REDIS_LOCK_PX,
+  });
+  if (!acquired) {
+    logger?.warn(
+      `Could not acquire Redis lock for ${lockKey}, skipping provisioning for '${projectKey}'.`,
+    );
+    return result;
+  }
+
+  try {
+    const [repoOrg, course] = await Promise.all([
+      getProjectRepoOrg({ tx: prismaClient, courseId, projectKey }),
+      prismaClient.course.findUniqueOrThrow({
+        where: { id: courseId },
+        select: {
+          githubToken: true,
+          staffTeamSlug: true,
+          githubRepoPrefix: true,
+        },
+      }),
+    ]);
+    const teamSlug = getStaffTeamSlug({
+      staffTeamSlug: course.staffTeamSlug,
+      githubRepoPrefix: course.githubRepoPrefix,
+    });
+
+    const pending = await prismaClient.projectRepoPool.findMany({
+      where: { courseId, projectKey, provisionedAt: null },
+      select: { repoName: true },
+      orderBy: { sortOrder: "asc" },
+    });
+
+    for (const { repoName } of pending) {
+      try {
+        await createOrgRepo({
+          githubToken: course.githubToken,
+          orgName: repoOrg,
+          repoName,
+          logger,
+        });
+        await addTeamRepoAccess({
+          githubToken: course.githubToken,
+          orgName: repoOrg,
+          teamSlug,
+          repoName,
+          logger,
+        });
+        await prismaClient.projectRepoPool.updateMany({
+          where: { courseId, projectKey, repoName, provisionedAt: null },
+          data: { provisionedAt: new Date() },
+        });
+        result.provisioned.push(repoName);
+      } catch (e) {
+        result.failed.push({ repoName, error: String(e) });
+        logger?.warn(
+          `Provisioning failed for ${repoName}: ${e} (will retry on next provision run)`,
+        );
+      }
+      await new Promise((r) => setTimeout(r, PROVISION_THROTTLE_MS));
+    }
+  } finally {
+    const current = await redisClient.get(lockKey);
+    if (current && parseInt(current, 10) === lockTs) {
+      await redisClient.del(lockKey);
+    }
+  }
+  return result;
 }

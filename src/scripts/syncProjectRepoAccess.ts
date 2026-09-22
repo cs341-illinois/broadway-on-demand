@@ -16,6 +16,7 @@ if (!process.env.DATABASE_URL) {
 import pino from "pino";
 import { PrismaClient } from "../generated/prisma/client.js";
 import { retryAsync } from "../functions/utils.js";
+import { getStaffTeamSlug } from "../functions/projectRepos.js";
 
 const logger = pino.pino({ level: process.env.LOG_LEVEL || "info" });
 const prisma = new PrismaClient();
@@ -127,10 +128,15 @@ async function main() {
 
   const course = await prisma.course.findUniqueOrThrow({
     where: { id: courseId },
-    select: { githubOrg: true, githubToken: true, githubRepoPrefix: true },
+    select: {
+      githubOrg: true,
+      githubToken: true,
+      githubRepoPrefix: true,
+      staffTeamSlug: true,
+    },
   });
 
-  const staffTeam = `${course.githubRepoPrefix}_staff-team`;
+  const staffTeam = getStaffTeamSlug(course);
 
   const assignments = await prisma.projectRepoAssignment.findMany({
     where: {

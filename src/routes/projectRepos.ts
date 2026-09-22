@@ -11,6 +11,11 @@ import {
 import {
   reconcileProjectRepoAssignments,
   manualAssignRepo,
+  provisionPendingRepos,
+  getProjectRepoConfig,
+  getProjectRepoOrg,
+  getProjectRoundNumber,
+  getStaffTeamSlug,
 } from "../functions/projectRepos.js";
 import {
   addRepoCollaborator,
@@ -24,7 +29,15 @@ const projectKeyParams = z.object({
   projectKey: z.string().min(1),
 });
 
-const projectEntry = z.object({ projectKey: z.string().min(1) });
+const projectEntry = z.object({
+  projectKey: z.string().min(1),
+  repoMode: z.enum(["POOL", "ON_DEMAND"]),
+  repoProjectName: z.string().nullable(),
+});
+
+// Repo names allocated in the DB but not yet created on GitHub (on-demand
+// projects) - drives the "Provision pending repos" affordance.
+const pendingRepoEntry = z.object({ repoName: z.string().min(1) });
 
 const freeRepoEntry = z.object({
   repoName: z.string().min(1),
@@ -67,6 +80,21 @@ const projectReposStatusResponse = z.object({
   conflicts: z.array(conflictEntry),
   gaps: z.array(gapEntry),
   assignments: z.array(assignmentEntry),
+  repoMode: z.enum(["POOL", "ON_DEMAND"]),
+  pendingRepos: z.array(pendingRepoEntry),
+});
+
+const configBody = z.object({
+  repoMode: z.enum(["POOL", "ON_DEMAND"]),
+  // Required for ON_DEMAND (used in repo names); ignored/rejected-nonempty for POOL.
+  repoProjectName: z
+    .string()
+    .regex(/^[a-z0-9_-]+$/, "Lowercase letters, digits, hyphens, underscores only")
+    .nullable()
+    .optional(),
+  // GitHub org this project's repos live in. Null/omitted falls back to the
+  // course's githubOrg (legacy POOL projects).
+  githubOrg: z.string().min(1).nullable().optional(),
 });
 
 const releaseBody = z.object({ repoName: z.string().min(1) });
@@ -156,9 +184,18 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
         .map((r) => r.projectKey)
         .filter((pk): pk is string => pk !== null)
         .sort();
-      return reply
-        .status(200)
-        .send(projectKeys.map((projectKey) => ({ projectKey })));
+      const configs = await fastify.prismaClient.projectRepoConfig.findMany({
+        where: { courseId, projectKey: { in: projectKeys } },
+        select: { projectKey: true, repoMode: true, repoProjectName: true },
+      });
+      const configByKey = new Map(configs.map((c) => [c.projectKey, c]));
+      return reply.status(200).send(
+        projectKeys.map((projectKey) => ({
+          projectKey,
+          repoMode: configByKey.get(projectKey)?.repoMode ?? "POOL",
+          repoProjectName: configByKey.get(projectKey)?.repoProjectName ?? null,
+        })),
+      );
     },
   );
 
@@ -179,6 +216,11 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
     async (request, reply) => {
       const { courseId, projectKey } = request.params;
 
+      const projectRound = await getProjectRoundNumber({
+        tx: fastify.prismaClient,
+        courseId,
+        projectKey,
+      });
       const [pool, allAssignments, groups, enabledStudents] = await Promise.all(
         [
           fastify.prismaClient.projectRepoPool.findMany({
@@ -198,7 +240,7 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
             },
           }),
           fastify.prismaClient.partnerGroup.findMany({
-            where: { courseId, roundNumber: 1, archivedAt: null },
+            where: { courseId, roundNumber: projectRound, archivedAt: null },
             include: { members: { select: { netId: true } } },
           }),
           fastify.prismaClient.users.findMany({
@@ -301,7 +343,7 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
             );
           } else {
             reasons.push(
-              `${a.netId}: ${enabledNetIds.has(a.netId) ? "not in any active Round-1 group" : "disabled/dropped"}`,
+              `${a.netId}: ${enabledNetIds.has(a.netId) ? "not in any active partner-round group" : "disabled/dropped"}`,
             );
           }
         }
@@ -355,12 +397,28 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
             a.netId.localeCompare(b.netId),
         );
 
+      const config = await getProjectRepoConfig({
+        tx: fastify.prismaClient,
+        courseId,
+        projectKey,
+      });
+      const pendingRepos =
+        config.repoMode === "ON_DEMAND"
+          ? await fastify.prismaClient.projectRepoPool.findMany({
+              where: { courseId, projectKey, provisionedAt: null },
+              select: { repoName: true },
+              orderBy: { sortOrder: "asc" },
+            })
+          : [];
+
       return reply.status(200).send({
         freeRepos,
         garbageRepos,
         conflicts,
         gaps,
         assignments: assignmentsOut,
+        repoMode: config.repoMode,
+        pendingRepos,
       });
     },
   );
@@ -396,12 +454,16 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
         }
         const netIds = active.map((a) => a.netId);
 
-        const activeRound1Groups = await tx.partnerGroup.findMany({
-          where: { courseId, roundNumber: 1, archivedAt: null },
+        const activeGroups = await tx.partnerGroup.findMany({
+          where: {
+            courseId,
+            roundNumber: await getProjectRoundNumber({ tx, courseId, projectKey }),
+            archivedAt: null,
+          },
           select: { members: { select: { netId: true } } },
         });
         const activeGroupNetIds = new Set<string>();
-        for (const g of activeRound1Groups) {
+        for (const g of activeGroups) {
           for (const m of g.members) activeGroupNetIds.add(m.netId);
         }
         const enabledUsers = await tx.users.findMany({
@@ -413,7 +475,7 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
           .filter((n) => activeGroupNetIds.has(n));
         if (blocking.length > 0) {
           throw new ConflictError({
-            message: `Cannot release ${repoName}: ${blocking.join(", ")} are enabled and in an active Round-1 group.`,
+            message: `Cannot release ${repoName}: ${blocking.join(", ")} are enabled and in an active partner-round group.`,
           });
         }
 
@@ -606,6 +668,8 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
             extended: z.number(),
             conflicts: z.number(),
             gaps: z.number(),
+            provisioned: z.number(),
+            provisionFailed: z.number(),
           }),
         },
       },
@@ -633,13 +697,134 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
         "Project repo reconciliation triggered manually",
       );
 
+      // Post-commit provisioning: reconcile only allocated rows; the GitHub
+      // repos are created here, outside the DB transaction.
+      const provision = await provisionPendingRepos({
+        prismaClient: fastify.prismaClient,
+        redisClient: fastify.redisClient,
+        courseId,
+        projectKey,
+        logger: request.log,
+      });
+
       return reply.status(200).send({
         projectKey: summary.projectKey,
         claimed: summary.claimed.length,
         extended: summary.extended.length,
         conflicts: summary.conflicts.length,
         gaps: summary.gaps.length,
+        provisioned: provision.provisioned.length,
+        provisionFailed: provision.failed.length,
       });
+    },
+  );
+
+  // Upserts the per-project provisioning config (repoMode + repoProjectName).
+  // Mode changes are rejected once the project has any pool rows, so a
+  // project never mixes imported pool repos with on-demand allocation.
+  fastify.withTypeProvider<FastifyZodOpenApiTypeProvider>().put(
+    "/:courseId/:projectKey/config",
+    {
+      onRequest: async (request, reply) => {
+        await fastify.authorize(request, reply, request.params.courseId, [
+          Role.ADMIN,
+        ]);
+      },
+      schema: {
+        params: projectKeyParams,
+        body: configBody,
+        response: {
+          200: z.object({
+            projectKey: z.string(),
+            repoMode: z.enum(["POOL", "ON_DEMAND"]),
+            repoProjectName: z.string().nullable(),
+          }),
+        },
+      },
+    },
+    async (request, reply) => {
+      const { courseId, projectKey } = request.params;
+      const { repoMode, repoProjectName, githubOrg } = request.body;
+
+      if (repoMode === "ON_DEMAND" && !repoProjectName) {
+        throw new ValidationError({
+          message: "repoProjectName is required for ON_DEMAND projects.",
+        });
+      }
+
+      const existingPoolCount =
+        await fastify.prismaClient.projectRepoPool.count({
+          where: { courseId, projectKey },
+        });
+      const existing = await fastify.prismaClient.projectRepoConfig.findUnique({
+        where: { courseId_projectKey: { courseId, projectKey } },
+      });
+      if (
+        existing &&
+        existing.repoMode !== repoMode &&
+        existingPoolCount > 0
+      ) {
+        throw new ConflictError({
+          message: `Cannot change repoMode while the project has ${existingPoolCount} pool row(s).`,
+        });
+      }
+
+      const saved = await fastify.prismaClient.projectRepoConfig.upsert({
+        where: { courseId_projectKey: { courseId, projectKey } },
+        create: {
+          courseId,
+          projectKey,
+          repoMode,
+          repoProjectName: repoProjectName ?? null,
+          githubOrg: githubOrg ?? null,
+        },
+        update: {
+          repoMode,
+          repoProjectName: repoProjectName ?? null,
+          githubOrg: githubOrg ?? null,
+        },
+      });
+
+      return reply.status(200).send({
+        projectKey,
+        repoMode: saved.repoMode,
+        repoProjectName: saved.repoProjectName,
+      });
+    },
+  );
+
+  // Creates GitHub repos for every allocated-but-unprovisioned pool row of an
+  // on-demand project. Idempotent; safe to re-run (retry button).
+  fastify.withTypeProvider<FastifyZodOpenApiTypeProvider>().post(
+    "/:courseId/:projectKey/provision",
+    {
+      onRequest: async (request, reply) => {
+        await fastify.authorize(request, reply, request.params.courseId, [
+          Role.ADMIN,
+        ]);
+      },
+      schema: {
+        params: projectKeyParams,
+        response: {
+          200: z.object({
+            provisioned: z.array(z.string()),
+            failed: z.array(
+              z.object({ repoName: z.string(), error: z.string() }),
+            ),
+          }),
+        },
+      },
+    },
+    async (request, reply) => {
+      const { courseId, projectKey } = request.params;
+      const result = await provisionPendingRepos({
+        prismaClient: fastify.prismaClient,
+        redisClient: fastify.redisClient,
+        courseId,
+        projectKey,
+        logger: request.log,
+      });
+      return reply.status(200).send(result);
     },
   );
 
@@ -685,10 +870,17 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
 
       // Grant access one collaborator at a time — scoped to just the
       // students we touched, not the full project-wide syncAccess sweep.
-      const course = await fastify.prismaClient.course.findUniqueOrThrow({
-        where: { id: courseId },
-        select: { githubOrg: true, githubToken: true },
-      });
+      const [repoOrg, course] = await Promise.all([
+        getProjectRepoOrg({
+          tx: fastify.prismaClient,
+          courseId,
+          projectKey,
+        }),
+        fastify.prismaClient.course.findUniqueOrThrow({
+          where: { id: courseId },
+          select: { githubToken: true },
+        }),
+      ]);
       const mappings =
         await fastify.prismaClient.githubUsernameMapping.findMany({
           where: {
@@ -715,7 +907,7 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
         try {
           await addRepoCollaborator({
             githubToken: course.githubToken,
-            orgName: course.githubOrg,
+            orgName: repoOrg,
             repoName: r.repoName,
             username,
             logger: request.log,
@@ -762,7 +954,7 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
         try {
           await removeRepoCollaborator({
             githubToken: course.githubToken,
-            orgName: course.githubOrg,
+            orgName: repoOrg,
             repoName,
             username,
             logger: request.log,
@@ -786,7 +978,7 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
         try {
           await removeRepoCollaborator({
             githubToken: course.githubToken,
-            orgName: course.githubOrg,
+            orgName: repoOrg,
             repoName: r.previousRepoName,
             username,
             logger: request.log,
@@ -846,12 +1038,23 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
     async (request, reply) => {
       const { courseId, projectKey } = request.params;
 
-      const course = await fastify.prismaClient.course.findUniqueOrThrow({
-        where: { id: courseId },
-        select: { githubOrg: true, githubToken: true, githubRepoPrefix: true },
-      });
+      const [repoOrg, course] = await Promise.all([
+        getProjectRepoOrg({
+          tx: fastify.prismaClient,
+          courseId,
+          projectKey,
+        }),
+        fastify.prismaClient.course.findUniqueOrThrow({
+          where: { id: courseId },
+          select: {
+            githubToken: true,
+            githubRepoPrefix: true,
+            staffTeamSlug: true,
+          },
+        }),
+      ]);
 
-      const staffTeam = `${course.githubRepoPrefix}_staff-team`;
+      const staffTeam = getStaffTeamSlug(course);
 
       const assignments =
         await fastify.prismaClient.projectRepoAssignment.findMany({
@@ -915,7 +1118,7 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
           let page = 1;
           while (true) {
             const listRes = await fetch(
-              `https://api.github.com/repos/${course.githubOrg}/${repoName}/collaborators?affiliation=direct&per_page=100&page=${page}`,
+              `https://api.github.com/repos/${repoOrg}/${repoName}/collaborators?affiliation=direct&per_page=100&page=${page}`,
               { headers: ghHeaders },
             );
             if (listRes.status !== 200) {
@@ -944,7 +1147,7 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
               confirmed++;
             } else {
               const addRes = await fetch(
-                `https://api.github.com/repos/${course.githubOrg}/${repoName}/collaborators/${username}`,
+                `https://api.github.com/repos/${repoOrg}/${repoName}/collaborators/${username}`,
                 {
                   method: "PUT",
                   headers: { ...ghHeaders, "Content-Type": "application/json" },
@@ -971,7 +1174,7 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
             if (expectedUsernames.has(login)) continue;
 
             const removeRes = await fetch(
-              `https://api.github.com/repos/${course.githubOrg}/${repoName}/collaborators/${login}`,
+              `https://api.github.com/repos/${repoOrg}/${repoName}/collaborators/${login}`,
               { method: "DELETE", headers: ghHeaders },
             );
             if (removeRes.status !== 204) {

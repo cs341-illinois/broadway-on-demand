@@ -39,7 +39,10 @@ import partnerRoutes from "./routes/partners.js";
 import gradebookRoutes from "./routes/gradebook.js";
 import projectReposRoutes from "./routes/projectRepos.js";
 import projectGradesRoutes from "./routes/projectGrades.js";
-import { reconcileAllProjectKeysWithLock } from "./functions/projectRepos.js";
+import {
+  provisionPendingRepos,
+  reconcileAllProjectKeysWithLock,
+} from "./functions/projectRepos.js";
 
 const SESSION_TTL = 86400 * 1000; // 1 day in seconds
 
@@ -282,12 +285,36 @@ try {
       select: { id: true },
     });
     for (const { id: courseId } of courses) {
-      await reconcileAllProjectKeysWithLock({
+      const summaries = await reconcileAllProjectKeysWithLock({
         prismaClient: server.prismaClient,
         redisClient: server.redisClient,
         courseId,
         logger: server.log,
       });
+      // Post-commit provisioning of on-demand repos allocated above
+      // (new groups/staff since last boot). Fail-soft per projectKey.
+      for (const summary of summaries) {
+        try {
+          const provision = await provisionPendingRepos({
+            prismaClient: server.prismaClient,
+            redisClient: server.redisClient,
+            courseId,
+            projectKey: summary.projectKey,
+            logger: server.log,
+          });
+          if (provision.provisioned.length > 0 || provision.failed.length > 0) {
+            server.log.info(
+              { courseId, projectKey: summary.projectKey, provision },
+              "Startup on-demand repo provisioning",
+            );
+          }
+        } catch (e) {
+          server.log.error(
+            { err: e, courseId, projectKey: summary.projectKey },
+            "Startup on-demand repo provisioning failed (fail-soft)",
+          );
+        }
+      }
     }
   } catch (e) {
     server.log.error({ err: e }, "Startup project repo reconciliation failed (fail-soft)");

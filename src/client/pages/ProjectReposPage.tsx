@@ -33,6 +33,8 @@ import { Role } from "../enums";
 
 interface ProjectEntry {
   projectKey: string;
+  repoMode: "POOL" | "ON_DEMAND";
+  repoProjectName: string | null;
 }
 
 interface FreeRepo {
@@ -76,6 +78,8 @@ interface ProjectReposStatus {
   conflicts: Conflict[];
   gaps: Gap[];
   assignments: AssignmentRow[];
+  repoMode: "POOL" | "ON_DEMAND";
+  pendingRepos: { repoName: string }[];
 }
 
 interface ProjectReposPageData {
@@ -140,6 +144,7 @@ function ProjectReposContent({
   const [isReconciling, setIsReconciling] = useState(false);
   const [showReconcileConfirm, setShowReconcileConfirm] = useState(false);
   const [isSyncingAccess, setIsSyncingAccess] = useState(false);
+  const [isProvisioning, setIsProvisioning] = useState(false);
   const [assignNetIdsInput, setAssignNetIdsInput] = useState("");
   const [assignRepoNameInput, setAssignRepoNameInput] = useState("");
   const [isAssigning, setIsAssigning] = useState(false);
@@ -278,6 +283,8 @@ function ProjectReposContent({
         extended: number;
         conflicts: number;
         gaps: number;
+        provisioned: number;
+        provisionFailed: number;
       }>(`api/v1/projectRepos/${courseId}/${selectedProjectKey}/reconcile`, {
         method: "POST",
         body: JSON.stringify({}),
@@ -287,17 +294,54 @@ function ProjectReposContent({
       if (result.extended) parts.push(`${result.extended} extension(s)`);
       if (result.conflicts) parts.push(`${result.conflicts} conflict(s)`);
       if (result.gaps) parts.push(`${result.gaps} gap(s)`);
+      if (result.provisioned)
+        parts.push(`${result.provisioned} repo(s) provisioned`);
+      if (result.provisionFailed)
+        parts.push(`${result.provisionFailed} provision failure(s)`);
       showAlert(
         parts.length > 0
           ? `Reconciliation complete: ${parts.join(", ")}.`
           : "Reconciliation complete: nothing to do.",
-        "success",
+        result.provisionFailed > 0 ? "warning" : "success",
       );
       refresh();
     } catch (error) {
       showAlert((error as Error).message || "Reconciliation failed.", "danger");
     } finally {
       setIsReconciling(false);
+    }
+  };
+
+  const handleProvision = async () => {
+    if (!selectedProjectKey) return;
+    setIsProvisioning(true);
+    try {
+      const result = await fetchJson<{
+        provisioned: string[];
+        failed: { repoName: string; error: string }[];
+      }>(`api/v1/projectRepos/${courseId}/${selectedProjectKey}/provision`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      if (result.failed.length > 0) {
+        showAlert(
+          `Provisioned ${result.provisioned.length} repo(s); ${result.failed.length} failed: ${result.failed.map((f) => f.repoName).join(", ")}. Re-run to retry.`,
+          "warning",
+          10000,
+        );
+      } else if (result.provisioned.length > 0) {
+        showAlert(
+          `Provisioned ${result.provisioned.length} repo(s) with staff team access.`,
+          "success",
+        );
+      } else {
+        showAlert("No pending repos to provision.", "info");
+      }
+      refresh();
+    } catch (error) {
+      showAlert((error as Error).message || "Provisioning failed.", "danger");
+    } finally {
+      setIsProvisioning(false);
     }
   };
 
@@ -430,6 +474,12 @@ function ProjectReposContent({
     ],
   };
 
+  const selectedProject = projects.find(
+    (p) => p.projectKey === selectedProjectKey,
+  );
+  const isOnDemand = selectedProject?.repoMode === "ON_DEMAND";
+  const pendingCount = status?.pendingRepos.length ?? 0;
+
   return (
     <>
       <AppNavbar title={courseDetails.name} breadcrumb={breadcrumb} />
@@ -460,6 +510,25 @@ function ProjectReposContent({
                 ) : null}
                 Reconcile
               </Button>
+              {isOnDemand && (
+                <Button
+                  variant="warning"
+                  onClick={handleProvision}
+                  disabled={isProvisioning || statusLoading}
+                  className="me-2"
+                  title="Create GitHub repos for groups/staff allocated but not yet created"
+                >
+                  {isProvisioning ? (
+                    <Spinner
+                      as="span"
+                      size="sm"
+                      animation="border"
+                      className="me-1"
+                    />
+                  ) : null}
+                  Provision pending repos{pendingCount > 0 ? ` (${pendingCount})` : ""}
+                </Button>
+              )}
               <Button
                 variant="success"
                 onClick={handleSyncAccess}
@@ -658,43 +727,91 @@ function ProjectReposContent({
                 )}
                 <Row className="mb-4">
                   <Col>
-                    <Card>
-                      <Card.Header as="h5">
-                        Free Repos{" "}
-                        <Badge bg="success">{status.freeRepos.length}</Badge>
-                      </Card.Header>
-                      <Card.Body>
-                        {status.freeRepos.length === 0 ? (
-                          <p className="text-muted mb-0">
-                            No free repos in the pool. Pool may be exhausted.
-                          </p>
-                        ) : (
-                          <Table
-                            responsive
-                            striped
-                            bordered
-                            hover
-                            size="sm"
-                            className="mb-0"
-                          >
-                            <thead>
-                              <tr>
-                                <th>Sort Order</th>
-                                <th>Repo Name</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {status.freeRepos.map((r) => (
-                                <tr key={r.repoName}>
-                                  <td>{r.sortOrder}</td>
-                                  <td>{r.repoName}</td>
+                    {isOnDemand ? (
+                      <Card>
+                        <Card.Header as="h5">
+                          Pending Provisioning{" "}
+                          <Badge bg="warning" text="dark">
+                            {status.pendingRepos.length}
+                          </Badge>
+                        </Card.Header>
+                        <Card.Body>
+                          {status.pendingRepos.length === 0 ? (
+                            <p className="text-muted mb-0">
+                              All allocated repos exist on GitHub. New
+                              groups/staff are allocated by Reconcile.
+                            </p>
+                          ) : (
+                            <>
+                              <p className="text-muted">
+                                Allocated in the database but not yet created
+                                on GitHub. Use "Provision pending repos" above
+                                (or the next Reconcile) to create them.
+                              </p>
+                              <Table
+                                responsive
+                                striped
+                                bordered
+                                hover
+                                size="sm"
+                                className="mb-0"
+                              >
+                                <thead>
+                                  <tr>
+                                    <th>Repo Name</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {status.pendingRepos.map((r) => (
+                                    <tr key={r.repoName}>
+                                      <td>{r.repoName}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </Table>
+                            </>
+                          )}
+                        </Card.Body>
+                      </Card>
+                    ) : (
+                      <Card>
+                        <Card.Header as="h5">
+                          Free Repos{" "}
+                          <Badge bg="success">{status.freeRepos.length}</Badge>
+                        </Card.Header>
+                        <Card.Body>
+                          {status.freeRepos.length === 0 ? (
+                            <p className="text-muted mb-0">
+                              No free repos in the pool. Pool may be exhausted.
+                            </p>
+                          ) : (
+                            <Table
+                              responsive
+                              striped
+                              bordered
+                              hover
+                              size="sm"
+                              className="mb-0"
+                            >
+                              <thead>
+                                <tr>
+                                  <th>Sort Order</th>
+                                  <th>Repo Name</th>
                                 </tr>
-                              ))}
-                            </tbody>
-                          </Table>
-                        )}
-                      </Card.Body>
-                    </Card>
+                              </thead>
+                              <tbody>
+                                {status.freeRepos.map((r) => (
+                                  <tr key={r.repoName}>
+                                    <td>{r.sortOrder}</td>
+                                    <td>{r.repoName}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </Table>
+                          )}
+                        </Card.Body>
+                      </Card>
+                    )}
                   </Col>
                 </Row>
 

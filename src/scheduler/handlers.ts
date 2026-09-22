@@ -84,6 +84,18 @@ export const startScheduledJob = async ({
       });
       repoMap = Object.fromEntries(assignments.map((a) => [a.netId, a.repoName]));
     }
+    // Project repos may live in a per-project org (on-demand mode); tell
+    // Jenkins which org to clone from. Labs send nothing (legacy ORG_ID).
+    let repoOrg: string | undefined;
+    if (repoMap) {
+      const config = await prismaClient.projectRepoConfig.findUnique({
+        where: {
+          courseId_projectKey: { courseId: job.courseId, projectKey: projectKey! },
+        },
+        select: { githubOrg: true },
+      });
+      repoOrg = config?.githubOrg ?? undefined;
+    }
     const queueUrl = await startGradingRun({
       courseId: job.courseId,
       jenkinsPipelineName: jenkinsPipelineName || job.assignmentId,
@@ -95,6 +107,7 @@ export const startScheduledJob = async ({
       courseTimezone,
       jenkinsToken,
       repoMap,
+      repoOrg,
       logger,
     });
     if (queueUrl) {

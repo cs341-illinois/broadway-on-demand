@@ -22,6 +22,7 @@ interface CreateProjectModalProps {
   handleSubmit: (data: {
     projectKey: string;
     repoProjectName: string;
+    repoMode: "POOL" | "ON_DEMAND";
     partnerRoundNumber: number;
     components: ProjectComponent[];
   }) => Promise<void>;
@@ -38,6 +39,7 @@ export default function CreateProjectModal({
 }: CreateProjectModalProps) {
   const [projectKey, setProjectKey] = useState("");
   const [repoProjectName, setRepoProjectName] = useState("");
+  const [repoMode, setRepoMode] = useState<"POOL" | "ON_DEMAND">("POOL");
   const [partnerRoundNumber, setPartnerRoundNumber] = useState(1);
   const [repoCount, setRepoCount] = useState(200);
   const [components, setComponents] = useState<ComponentDraft[]>([
@@ -70,6 +72,7 @@ export default function CreateProjectModal({
   const reset = () => {
     setProjectKey("");
     setRepoProjectName("");
+    setRepoMode("POOL");
     setPartnerRoundNumber(1);
     setRepoCount(200);
     setComponents([
@@ -123,6 +126,7 @@ export default function CreateProjectModal({
       await handleSubmit({
         projectKey: projectKey.trim(),
         repoProjectName: repoProjectName.trim(),
+        repoMode,
         partnerRoundNumber,
         components: components.map((c, i) => ({
           ...c,
@@ -168,8 +172,45 @@ export default function CreateProjectModal({
             isInvalid={!!error && !repoProjectName.trim()}
           />
           <Form.Text className="text-muted">
-            Used in repo names: <code>{`{prefix}_.${repoProjectName || "project-1"}_.team-001`}</code>.
-            After creating, run: <code>{`npx tsx src/scripts/importProjectRepoPool.ts <courseId> ${projectKey || "project1"} ${repoProjectName || "project-01"} ${repoCount}`}</code>
+            Used in repo names:{" "}
+            <code>{`{prefix}_.${repoProjectName || "project-1"}_.team-001`}</code>
+            {repoMode === "POOL" && (
+              <>
+                . After creating, run:{" "}
+                <code>{`npx tsx src/scripts/importProjectRepoPool.ts <courseId> ${projectKey || "project1"} ${repoProjectName || "project-01"} ${repoCount}`}</code>
+              </>
+            )}
+          </Form.Text>
+        </Form.Group>
+
+        <Form.Group className="mb-3">
+          <Form.Label>Repo Provisioning</Form.Label>
+          <div>
+            <Form.Check
+              inline
+              type="radio"
+              label="Pre-allocated pool"
+              name="repoMode"
+              id="repoMode-pool"
+              checked={repoMode === "POOL"}
+              onChange={() => setRepoMode("POOL")}
+              disabled={disabled}
+            />
+            <Form.Check
+              inline
+              type="radio"
+              label="Create repos on demand"
+              name="repoMode"
+              id="repoMode-on-demand"
+              checked={repoMode === "ON_DEMAND"}
+              onChange={() => setRepoMode("ON_DEMAND")}
+              disabled={disabled}
+            />
+          </div>
+          <Form.Text className="text-muted">
+            {repoMode === "POOL"
+              ? "Repos must be pre-created in the GitHub org and imported by script (the existing flow)."
+              : "Broadway creates a fresh private GitHub repo for each group (and each staff member) when first needed - no pool import required."}
           </Form.Text>
         </Form.Group>
 

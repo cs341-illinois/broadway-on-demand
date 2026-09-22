@@ -381,6 +381,7 @@ export default function CourseHomePage(): JSX.Element {
   const handleProjectSubmit = async (data: {
     projectKey: string;
     repoProjectName: string;
+    repoMode: "POOL" | "ON_DEMAND";
     partnerRoundNumber: number;
     components: { id: string; name: string; gradingMode: string; weight: number }[];
   }): Promise<void> => {
@@ -449,15 +450,49 @@ export default function CourseHomePage(): JSX.Element {
         errors.push(`${comp.name}: ${e.message}`);
       }
     }
+
+    // Persist the per-project provisioning config after the assignment rows
+    // exist (POOL projects default to it implicitly; only ON_DEMAND needs the
+    // explicit row with repoProjectName).
+    let configError: string | null = null;
+    try {
+      const res = await fetch(
+        formulateUrl(`api/v1/projectRepos/${courseId}/${data.projectKey}/config`),
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            repoMode: data.repoMode,
+            repoProjectName: data.repoProjectName,
+          }),
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        configError = errBody.message || `status ${res.status}`;
+      }
+    } catch (e: any) {
+      configError = e.message;
+    }
+
     if (errors.length > 0) {
       showAlert(
         `Created ${created}/${data.components.length} components. Errors: ${errors.join("; ")}`,
         "warning",
         10000,
       );
+    } else if (configError) {
+      showAlert(
+        `Project "${data.projectKey}" created, but saving repo provisioning config failed: ${configError}. Set it on the Project Repos page.`,
+        "warning",
+        10000,
+      );
     } else {
       showAlert(
-        `Project "${data.projectKey}" created with ${created} components.`,
+        `Project "${data.projectKey}" created with ${created} components.` +
+          (data.repoMode === "ON_DEMAND"
+            ? " Repos will be created on demand as groups need them."
+            : ""),
         "success",
       );
     }
