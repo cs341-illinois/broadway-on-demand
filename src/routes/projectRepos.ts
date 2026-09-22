@@ -1055,6 +1055,14 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
       ]);
 
       const staffTeam = getStaffTeamSlug(course);
+      // Preserve both the configured staff team and the legacy
+      // `{prefix}_staff-team` convention: older repos may carry the legacy
+      // team's access, and removing team entries via the collaborators API
+      // is unreliable — never sweep either.
+      const preservedTeamSlugs = new Set([
+        staffTeam,
+        `${course.githubRepoPrefix}_staff-team`,
+      ]);
 
       const assignments =
         await fastify.prismaClient.projectRepoAssignment.findMany({
@@ -1170,7 +1178,7 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
 
           // Remove collaborators who shouldn't have access (preserve staff team)
           for (const login of currentCollaborators) {
-            if (login === staffTeam) continue;
+            if (preservedTeamSlugs.has(login)) continue;
             if (expectedUsernames.has(login)) continue;
 
             const removeRes = await fetch(
