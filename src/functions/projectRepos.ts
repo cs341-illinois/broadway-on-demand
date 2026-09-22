@@ -1209,10 +1209,29 @@ export async function provisionPendingRepos({
 
   const config = await prismaClient.projectRepoConfig.findUnique({
     where: { courseId_projectKey: { courseId, projectKey } },
-    select: { repoMode: true },
+    select: { repoMode: true, githubOrg: true },
   });
   if (config?.repoMode !== "ON_DEMAND") {
     return result;
+  }
+  // Fail fast instead of silently targeting Course.githubOrg: on-demand
+  // projects must declare their org explicitly (repo creation in the legacy
+  // fallback org is typically not permitted - e.g. SAML-protected course
+  // orgs), and a misconfiguration previously surfaced as uniform 403s on
+  // every repo rather than a clear message.
+  if (!config.githubOrg) {
+    const pending = await prismaClient.projectRepoPool.findMany({
+      where: { courseId, projectKey, provisionedAt: null },
+      select: { repoName: true },
+    });
+    const message =
+      "ProjectRepoConfig.githubOrg is not set for this on-demand project. " +
+      "Set it via SQL or PUT /projectRepos/:courseId/:projectKey/config before provisioning.";
+    logger?.warn(`Provisioning aborted for '${projectKey}': ${message}`);
+    return {
+      provisioned: [],
+      failed: pending.map((p) => ({ repoName: p.repoName, error: message })),
+    };
   }
 
   const lockKey = `projectrepo:claim:${courseId}:${projectKey}`;

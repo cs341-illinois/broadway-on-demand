@@ -221,7 +221,8 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
         courseId,
         projectKey,
       });
-      const [pool, allAssignments, groups, enabledStudents] = await Promise.all(
+      const [pool, allAssignments, groups, enabledStudents, staffUsers] =
+        await Promise.all(
         [
           fastify.prismaClient.projectRepoPool.findMany({
             where: { courseId, projectKey },
@@ -247,10 +248,21 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
             where: { courseId, role: Role.STUDENT, enabled: true },
             select: { netId: true },
           }),
+          fastify.prismaClient.users.findMany({
+            where: {
+              courseId,
+              role: { in: [Role.STAFF, Role.ADMIN] },
+              enabled: true,
+            },
+            select: { netId: true },
+          }),
         ],
       );
 
       const enabledNetIds = new Set(enabledStudents.map((s) => s.netId));
+      // Staff/admins hold intentional standalone (non-group) repo assignments
+      // - never treat them as stale group members.
+      const staffNetIds = new Set(staffUsers.map((s) => s.netId));
 
       const activeAssignments = allAssignments.filter(
         (a) => a.releasedAt === null,
@@ -324,10 +336,16 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
       }
 
       // Garbage case 2: active assignments but all members stale or moved on.
+      // Staff/admin assignments are intentional standalones (their on-demand
+      // repos have no partner group) - they never count as stale.
       for (const [repoName, repoAssignments] of assignmentsByRepo) {
         let allStaleOrGone = true;
         const reasons: string[] = [];
         for (const a of repoAssignments) {
+          if (staffNetIds.has(a.netId)) {
+            allStaleOrGone = false;
+            break;
+          }
           const g = groupByNetId.get(a.netId);
           if (g) {
             const consensus = groupConsensus.get(g.id);

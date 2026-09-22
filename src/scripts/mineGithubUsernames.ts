@@ -223,8 +223,15 @@ async function main(): Promise<number> {
       });
     const { githubOrg, githubRepoPrefix, githubToken } = course;
 
+    // Mine students AND staff/admins - staff have individual {prefix}_{netId}
+    // repos too, and their mappings are needed for direct-collaborator invites
+    // on their on-demand project repos (syncAccess noMapping counts).
     const students = await prismaClient.users.findMany({
-      where: { courseId, role: Role.STUDENT, enabled: true },
+      where: {
+        courseId,
+        enabled: true,
+        role: { in: [Role.STUDENT, Role.STAFF, Role.ADMIN] },
+      },
       select: { netId: true },
       orderBy: { netId: "asc" },
     });
@@ -256,10 +263,10 @@ async function main(): Promise<number> {
 
     if (targets.length === 0) {
       console.log(
-        `No unmapped students to mine for course '${courseId}' (--only-missing=${onlyMissing}).`,
+        `No unmapped users to mine for course '${courseId}' (--only-missing=${onlyMissing}).`,
       );
       console.log(`  already-had-mapping: ${alreadyHadMapping}`);
-      console.log(`  total enabled students: ${totalEnabled}`);
+      console.log(`  total enabled users:     ${totalEnabled}`);
       return 0;
     }
 
@@ -433,7 +440,7 @@ async function main(): Promise<number> {
     console.log(`  anomalous-collaborator-count: ${anomalous}`);
     console.log(`  repo-not-found: ${repoNotFound}`);
     if (upsertFailed > 0) console.log(`  upsert-failed: ${upsertFailed}`);
-    console.log(`  total enabled students: ${totalEnabled}`);
+    console.log(`  total enabled users:     ${totalEnabled}`);
     console.log(
       `  yield: ${withMapping}/${totalEnabled} (${yieldPct.toFixed(1)}%)`,
     );

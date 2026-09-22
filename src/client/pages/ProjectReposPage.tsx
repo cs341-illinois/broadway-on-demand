@@ -324,10 +324,17 @@ function ProjectReposContent({
         body: JSON.stringify({}),
       });
       if (result.failed.length > 0) {
+        const first = result.failed[0];
+        const names = result.failed
+          .slice(0, 8)
+          .map((f) => f.repoName)
+          .join(", ");
         showAlert(
-          `Provisioned ${result.provisioned.length} repo(s); ${result.failed.length} failed: ${result.failed.map((f) => f.repoName).join(", ")}. Re-run to retry.`,
-          "warning",
-          10000,
+          `Provisioned ${result.provisioned.length} repo(s); ${result.failed.length} failed. ` +
+            `First error (${first.repoName}): ${first.error} ` +
+            `Failed: ${names}${result.failed.length > 8 ? ", …" : ""}. Re-run to retry.`,
+          "danger",
+          15000,
         );
       } else if (result.provisioned.length > 0) {
         showAlert(
