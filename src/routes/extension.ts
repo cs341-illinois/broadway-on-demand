@@ -559,7 +559,7 @@ const extensionRoutes: FastifyPluginAsync = async (fastify, _options) => {
         });
       const cleaned = data.map((x) => ({
         ...x,
-        hasFinalGradingRun: Boolean(x),
+        hasFinalGradingRun: Boolean(x.finalGradingRunId),
         openAt: x.openAt.toISOString(),
         closeAt: x.closeAt.toISOString(),
       }));

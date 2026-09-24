@@ -1,4 +1,4 @@
-import { AssignmentQuota, Prisma } from "../generated/prisma/client.js";
+import { AssignmentQuota, Prisma, PrismaClient } from "../generated/prisma/client.js";
 import moment, { relativeTimeRounding } from "moment-timezone";
 import { DatabaseFetchError } from "../errors/index.js";
 
@@ -67,4 +67,25 @@ export async function getActiveExtensions({
     }
   });
   return result;
+}
+
+export async function getExtendedDueDates({
+  tx,
+  courseId,
+  netId,
+}: {
+  tx: PrismaClient | Prisma.TransactionClient;
+  courseId: string;
+  netId: string;
+}): Promise<Map<string, Date>> {
+  const rows = await tx.extensions.findMany({
+    where: { courseId, netId },
+    select: { assignmentId: true, closeAt: true },
+  });
+  const latest = new Map<string, Date>();
+  for (const { assignmentId, closeAt } of rows) {
+    const current = latest.get(assignmentId);
+    if (!current || closeAt > current) latest.set(assignmentId, closeAt);
+  }
+  return latest;
 }

@@ -47,6 +47,7 @@ import { netIdSchema } from "../types/index.js";
 import { getGradingRunLog } from "../functions/jenkins.js";
 import { PrismaClientKnownRequestError } from "../generated/prisma/internal/prismaNamespace.js";
 import { assignmentGradeUploadbody } from "../types/grades.js";
+import { getExtendedDueDates } from "../functions/extensions.js"
 
 const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
   fastify.withTypeProvider<FastifyZodOpenApiTypeProvider>().get(
@@ -81,7 +82,22 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
         prismaClient,
         showInvisible,
       });
-      reply.send({ name, assignments: filteredAssignments });
+      let assignments = filteredAssignments;
+      if (!showInvisible) {
+        const netId = request.session.user.email.replace("@illinois.edu", "");
+        const extendedDueDates = await getExtendedDueDates({
+          tx: prismaClient,
+          courseId,
+          netId,
+        });
+        assignments = filteredAssignments.map((x) => {
+          const extended = extendedDueDates.get(x.id);
+          return extended && extended > new Date(x.dueAt)
+            ? { ...x, dueAt: extended.toISOString() }
+            : x;
+        });
+      }
+      reply.send({ name, assignments });
     },
   );
   fastify.withTypeProvider<FastifyZodOpenApiTypeProvider>().post(
@@ -334,7 +350,15 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
       const { name: assignmentName, openAt } = targetAssignment;
       const isStaff =
         courseRoles.includes(Role.ADMIN) || courseRoles.includes(Role.STAFF);
-      const dueAt = targetAssignment.dueAt;
+      let dueAt = targetAssignment.dueAt;
+      if (!isStaff) {
+        const extended = (
+          await getExtendedDueDates({ tx: fastify.prismaClient, courseId, netId })
+        ).get(assignmentId);
+        if (extended && extended > new Date(dueAt)) {
+          dueAt = extended.toISOString();
+        }
+      }
       const studentRuns = fastify.prismaClient.job.findMany({
         where: {
           netId: { has: netId },
