@@ -148,13 +148,16 @@ export async function startGradingRun({
     repoMap,
     repoOrg,
   });
-  const url = `${jenkinsJobUrl}?${new URLSearchParams(JSON.parse(JSON.stringify(params))).toString()}`;
-  const result = await fetch(url, {
+  const body = new URLSearchParams(
+    JSON.parse(JSON.stringify(params)),
+  ).toString();
+  const result = await fetch(jenkinsJobUrl, {
     method: "POST",
     headers: {
       Authorization: `Basic ${jenkinsToken}`,
-      "Content-Type": "application/json",
+      "Content-Type": "application/x-www-form-urlencoded",
     },
+    body,
   });
   if (result.status > 299) {
     logger.error(
