@@ -212,7 +212,7 @@ async function getGradeFileFromGithub({
   });
 }
 
-function generateGradesCsv(gradesData: GradeEntry[]) {
+export function generateGradesCsv(gradesData: GradeEntry[]) {
   const header = `"netid","score","comments"\n`;
   const values = gradesData
     .map(

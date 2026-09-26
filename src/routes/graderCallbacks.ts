@@ -262,6 +262,29 @@ const graderCallbackRoutes: FastifyPluginAsync = async (fastify, _options) => {
               }
             }
 
+            // Automated publishes must never lower a student's grade: floor each
+            // result at the student's currently published score for this
+            // assignment. Regrades already clamp in addGradingResult, so this is
+            // a no-op for them. Manual Grade Update / bulk upload paths bypass
+            // completeGradingRun entirely and remain authoritative.
+            const existingGrades = await tx.publishedGrades.findMany({
+              where: {
+                courseId: jobData.courseId,
+                assignmentId,
+                netId: { in: results.map((r) => r.netId) },
+              },
+              select: { netId: true, score: true },
+            });
+            const priorByNetId = new Map(
+              existingGrades.map((g) => [g.netId, g.score]),
+            );
+            for (const result of results) {
+              const prior = priorByNetId.get(result.netId);
+              if (prior !== undefined && result.score < prior) {
+                result.score = prior;
+              }
+            }
+
             // Staging grades already have correct scores (regrade logic applied in addGradingResult)
             const promises = results.map((x) => {
               return tx.publishedGrades.upsert({
