@@ -6,7 +6,7 @@ const __dirname = dirname(__filename);
 import "zod-openapi/extend";
 import path, { resolve } from "node:path";
 import FastifyVite from "@fastify/vite";
-import Fastify from "fastify";
+import Fastify, { type FastifyRequest } from "fastify";
 import FastifyCookie from "@fastify/cookie";
 import FastifyWebsocket from "@fastify/websocket";
 import fastifyOAuth2, { FastifyOAuth2Options } from "@fastify/oauth2";
@@ -39,6 +39,9 @@ import partnerRoutes from "./routes/partners.js";
 import gradebookRoutes from "./routes/gradebook.js";
 import projectReposRoutes from "./routes/projectRepos.js";
 import projectGradesRoutes from "./routes/projectGrades.js";
+import clinicRoutes from "./routes/clinics.js";
+import { OUTLOOK_SCOPES, saveOutlookGrant } from "./functions/outlook.js";
+import { type FullRoleEntry } from "./types/index.js";
 import {
   provisionPendingRepos,
   reconcileAllProjectKeysWithLock,
@@ -171,6 +174,117 @@ async function start() {
       maxAge: SESSION_TTL, // 1 day
     },
   } as FastifyOAuth2Options);
+  // Separate consent flow for staff Outlook calendar access (interview
+  // clinics), so regular logins keep their minimal scopes.
+  await server.register(fastifyOAuth2, {
+    name: "entraCalendar",
+    scope: OUTLOOK_SCOPES,
+    credentials: {
+      client: {
+        id: config.AZURE_CLIENT_ID,
+        secret: config.AZURE_CLIENT_SECRET,
+      },
+      auth: {
+        authorizeHost: "https://login.microsoftonline.com",
+        authorizePath: `/${config.AZURE_TENANT_ID}/oauth2/v2.0/authorize`,
+        tokenHost: "https://login.microsoftonline.com",
+        tokenPath: `/${config.AZURE_TENANT_ID}/oauth2/v2.0/token`,
+      },
+    },
+    callbackUri: `${config.HOST}${config.BASE_URL}/login/outlook/callback`,
+    redirectStateCookieName: "oauth2-outlook-redirect-state",
+    verifierCookieName: "oauth2-outlook-code-verifier",
+    cookie: {
+      secure: config.NODE_ENV === "production",
+      httpOnly: true,
+      maxAge: SESSION_TTL,
+    },
+  } as FastifyOAuth2Options);
+
+  const isStaffAnywhere = (request: FastifyRequest) =>
+    (request.session.user?.roles ?? []).some(
+      (r: FullRoleEntry) => r.role === Role.STAFF || r.role === Role.ADMIN,
+    );
+
+  server.get(
+    `${config.BASE_URL}/login/outlook`,
+    {},
+    async (request, reply) => {
+      if (!request.session?.user) {
+        return reply.redirect(`${config.BASE_URL}/login/entra`);
+      }
+      if (!isStaffAnywhere(request)) {
+        return reply.code(403).send("Only course staff can connect Outlook.");
+      }
+      const { courseId } = request.query as { courseId?: string };
+      request.session.outlookReturnTo =
+        courseId && /^[\w-]+$/.test(courseId)
+          ? `${config.BASE_URL}/dashboard/${courseId}/clinics`
+          : `${config.BASE_URL}/dashboard`;
+      await request.session.save();
+      const authorizationUri =
+        await server.entraCalendar.generateAuthorizationUri(request, reply);
+      return reply.redirect(authorizationUri);
+    },
+  );
+
+  server.get(
+    `${config.BASE_URL}/login/outlook/callback`,
+    {},
+    async (request, reply) => {
+      if (!request.session?.user || !isStaffAnywhere(request)) {
+        return reply.code(403).send("Only course staff can connect Outlook.");
+      }
+      const returnTo =
+        request.session.outlookReturnTo ?? `${config.BASE_URL}/dashboard`;
+      try {
+        const { token } =
+          await server.entraCalendar.getAccessTokenFromAuthorizationCodeFlow(
+            request,
+            reply,
+          );
+        if (!token.refresh_token) {
+          throw new Error("No refresh token returned; offline_access missing.");
+        }
+        const meResponse = await fetch("https://graph.microsoft.com/v1.0/me", {
+          headers: { Authorization: `Bearer ${token.access_token}` },
+        });
+        if (!meResponse.ok) {
+          throw new Error(`Failed to fetch profile: ${meResponse.statusText}`);
+        }
+        const me = (await meResponse.json()) as {
+          mail?: string;
+          userPrincipalName?: string;
+        };
+        const graphEmail = (me.mail || me.userPrincipalName || "").toLowerCase();
+        // Guard against granting a different Microsoft account than the one
+        // logged in to On-Demand.
+        if (graphEmail !== request.session.user.email.toLowerCase()) {
+          return reply
+            .code(400)
+            .send(
+              `Please connect the Outlook account for ${request.session.user.email}.`,
+            );
+        }
+        await saveOutlookGrant({
+          prismaClient: server.prismaClient,
+          redisClient: server.redisClient,
+          netId: request.session.user.email.replace("@illinois.edu", ""),
+          refreshToken: token.refresh_token,
+          accessToken: token.access_token,
+          expiresIn: Number(token.expires_in ?? 3600),
+          scopes: String(token.scope ?? OUTLOOK_SCOPES.join(" ")),
+        });
+        delete request.session.outlookReturnTo;
+        await request.session.save();
+        return reply.redirect(returnTo);
+      } catch (error) {
+        server.log.error(`Outlook connect error: ${error}`);
+        return reply.code(500).send("Failed to connect Outlook.");
+      }
+    },
+  );
+
   server.get(`${config.BASE_URL}/api/v1/pingz`, (req, reply) => {
     return reply.send("OK");
   });
@@ -252,6 +366,7 @@ async function start() {
       await api.register(gradebookRoutes, { prefix: "/gradebook" });
       await api.register(projectReposRoutes, { prefix: "/projectRepos" });
       await api.register(projectGradesRoutes, { prefix: "/projectGrades" });
+      await api.register(clinicRoutes, { prefix: "/clinics" });
       await api.register(extensionRoutes, { prefix: "/extension" });
       await api.register(studentInfoRoutes, { prefix: "/studentInfo" });
       await api.register(attendanceRoutes, { prefix: "/attendance" });

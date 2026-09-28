@@ -55,7 +55,21 @@ GRADER_TOKEN="a-secure-random-string-at-least-32-characters"
 
 # Database URL for Prisma
 DATABASE_URL="postgresql://local:local@localhost:5432/broadway_on_demand"
+
+# Optional: enables Outlook invites for interview clinics.
+# Generate with: openssl rand -base64 32
+OUTLOOK_TOKEN_KEY="base64-encoded-32-byte-key"
 ```
+
+#### Interview clinics (Outlook integration)
+
+Interview clinic bookings are added to the covering CA's Outlook calendar through Microsoft Graph, and the team's students are invited automatically. To enable this:
+
+1. Set `OUTLOOK_TOKEN_KEY`. It encrypts the stored refresh tokens.
+2. In the Azure app registration, add the redirect URI `${HOST}${BASE_URL}/login/outlook/callback`. For local development this is `http://localhost:3000/on-demand/login/outlook/callback`.
+3. Add the delegated Microsoft Graph permissions `Calendars.ReadWrite` and `offline_access`.
+
+Each CA then clicks **Connect Outlook** on the Interview Clinics page once before claiming slots.
 
 All environment variables are validated using Zod schema validation at application startup. The required variables include:
 

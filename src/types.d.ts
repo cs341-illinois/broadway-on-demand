@@ -12,6 +12,7 @@ import { type JobReconciler } from "./reconciler/index.ts";
 declare module "fastify" {
   interface FastifyInstance {
     entraId: FastifyOAuth2Namespace;
+    entraCalendar: FastifyOAuth2Namespace;
     prismaClient: PrismaClient;
     redisClient: RedisClientType;
     scheduler: JobScheduler;
@@ -28,5 +29,6 @@ declare module "fastify" {
     token?: OAuth2Token;
     user?: SessionUser;
     isAuthenticated?: boolean;
+    outlookReturnTo?: string;
   }
 }

@@ -8,6 +8,7 @@ interface ConfirmationModalProps {
   confirmText?: string;
   cancelText?: string;
   isProcessing?: boolean;
+  confirmVariant?: string;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -19,6 +20,7 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
   confirmText = "Confirm",
   cancelText = "Cancel",
   isProcessing = false,
+  confirmVariant = "danger",
   onConfirm,
   onCancel,
 }) => {
@@ -32,7 +34,7 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
         <Button variant="secondary" onClick={onCancel} disabled={isProcessing}>
           {cancelText}
         </Button>
-        <Button variant="danger" onClick={onConfirm} disabled={isProcessing}>
+        <Button variant={confirmVariant} onClick={onConfirm} disabled={isProcessing}>
           {isProcessing ? (
             <Spinner size="sm" animation="border" className="me-1" />
           ) : null}

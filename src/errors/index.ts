@@ -192,3 +192,16 @@ export class GithubError extends BaseError<"GithubError"> {
     });
   }
 }
+
+export class OutlookError extends BaseError<"OutlookError"> {
+  constructor({ message }: { message?: string } = {}) {
+    super({
+      name: "OutlookError",
+      id: 900,
+      message:
+        message ||
+        "Failed to contact Outlook. Please try again or contact support.",
+      httpStatusCode: 502,
+    });
+  }
+}
