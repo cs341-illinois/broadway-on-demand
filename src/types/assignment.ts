@@ -264,6 +264,9 @@ export const assignmentResponseBody = z.object({
       repoName: z.string(),
       repoUrl: z.string().url(),
       accessPending: z.boolean(),
+      // True when an invitation is open on GitHub awaiting acceptance
+      // (distinct from never-invited / not-synced, where this is false).
+      invitePending: z.boolean(),
     })
     .nullable()
     .optional(),
@@ -275,6 +278,7 @@ export const assignmentResponseBody = z.object({
         repoName: z.string(),
         repoUrl: z.string().url(),
         accessPending: z.boolean(),
+        invitePending: z.boolean(),
         projectKey: z.string(),
       }),
     )

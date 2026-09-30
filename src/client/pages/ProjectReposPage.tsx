@@ -70,6 +70,7 @@ interface AssignmentRow {
   partnerGroupId: string | null;
   assignedAt: string;
   githubAccessConfirmed: boolean;
+  githubInviteSentAt: string | null;
 }
 
 interface ProjectReposStatus {
@@ -449,6 +450,9 @@ function ProjectReposContent({
       const result = await fetchJson<{
         confirmed: number;
         added: number;
+        reinvited: number;
+        pendingInvites: number;
+        removed: number;
         noMapping: number;
         failed: number;
         total: number;
@@ -457,8 +461,12 @@ function ProjectReposContent({
         body: JSON.stringify({}),
       });
       const parts: string[] = [];
-      if (result.added) parts.push(`${result.added} newly added`);
-      if (result.confirmed) parts.push(`${result.confirmed} already confirmed`);
+      if (result.confirmed) parts.push(`${result.confirmed} verified access`);
+      if (result.added) parts.push(`${result.added} newly invited`);
+      if (result.reinvited)
+        parts.push(`${result.reinvited} re-invited (expired invite)`);
+      if (result.pendingInvites)
+        parts.push(`${result.pendingInvites} invites awaiting acceptance`);
       if (result.noMapping) parts.push(`${result.noMapping} missing username`);
       if (result.failed) parts.push(`${result.failed} failed`);
       showAlert(
@@ -1037,9 +1045,13 @@ function ProjectReposContent({
                                       <Badge bg="success">
                                         Access confirmed
                                       </Badge>
+                                    ) : a.githubInviteSentAt !== null ? (
+                                      <Badge bg="info">
+                                        Invite pending
+                                      </Badge>
                                     ) : (
                                       <Badge bg="warning" text="dark">
-                                        Access may be pending
+                                        Not invited
                                       </Badge>
                                     )}
                                   </td>

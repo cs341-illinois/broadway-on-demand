@@ -3,8 +3,11 @@
 // Also removes stale collaborators who no longer have an active assignment,
 // preserving the staff team ({githubRepoPrefix}_staff-team).
 //
-// Idempotent: adding an existing collaborator is a no-op. Sets githubAccessConfirmed
-// on success.
+// Maintains a sync-derived tri-state per assignment:
+//   githubAccessConfirmed  - verified direct collaborator
+//   githubInviteSentAt     - invitation open on GitHub, awaiting acceptance
+// A student in neither state (e.g. their invite expired before acceptance) is
+// re-invited with a fresh PUT, healing expired invitations on every run.
 //
 // Usage: npx tsx src/scripts/syncProjectRepoAccess.ts <courseId> [--projectKey <key>]
 import dotenv from "dotenv";
@@ -38,7 +41,7 @@ async function addCollaborator(
   repo: string,
   username: string,
   token: string,
-): Promise<void> {
+): Promise<number> {
   await throttle();
   const res = await fetch(
     `https://api.github.com/repos/${org}/${repo}/collaborators/${username}`,
@@ -58,6 +61,48 @@ async function addCollaborator(
       `Add collaborator failed: ${res.status} for ${org}/${repo}/${username}: ${body.slice(0, 200)}`,
     );
   }
+  return res.status;
+}
+
+// Lists invitee logins with a currently open invitation on the repo. Expired
+// invites vanish from this list, and entries can (rarely) carry expired:true —
+// treat those as not open so the re-invite branch fires instead.
+async function listInvitations(
+  org: string,
+  repo: string,
+  token: string,
+): Promise<string[]> {
+  const logins: string[] = [];
+  let page = 1;
+  while (true) {
+    await throttle();
+    const res = await fetch(
+      `https://api.github.com/repos/${org}/${repo}/invitations?per_page=100&page=${page}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+        },
+      },
+    );
+    if (res.status !== 200) {
+      throw new Error(
+        `List invitations failed: ${res.status} for ${org}/${repo}`,
+      );
+    }
+    const invites = (await res.json()) as {
+      invitee: { login: string } | null;
+      expired: boolean;
+    }[];
+    for (const inv of invites) {
+      if (inv.invitee && !inv.expired) {
+        logins.push(inv.invitee.login);
+      }
+    }
+    if (invites.length < 100) break;
+    page++;
+  }
+  return logins;
 }
 
 async function listCollaborators(
@@ -158,6 +203,7 @@ async function main() {
       repoName: true,
       projectKey: true,
       githubAccessConfirmed: true,
+      githubInviteSentAt: true,
     },
   });
 
@@ -184,8 +230,9 @@ async function main() {
   }
 
   let confirmed = 0;
-  let alreadyConfirmed = 0;
   let added = 0;
+  let reinvited = 0;
+  let pendingInvites = 0;
   let removed = 0;
   let noMapping = 0;
   let failed = 0;
@@ -216,37 +263,100 @@ async function main() {
         course.githubToken,
       );
 
-      // Add missing assigned students
+      // List currently open invitations on the repo. A student absent from
+      // both lists has no live access path — the signal that a fresh invite
+      // must be sent (e.g. the prior invite expired before acceptance).
+      const openInviteLogins = await retryAsync(
+        listInvitations,
+        { retries: 3, delayMs: 1000 },
+        course.githubOrg,
+        repoName,
+        course.githubToken,
+      );
+
+      // Reconcile each assigned student's access state against GitHub.
+      // githubAccessConfirmed is derived state meaning "verified direct
+      // collaborator"; githubInviteSentAt means "invitation open, awaiting
+      // acceptance".
       for (const a of repoAssignments) {
         const username = usernameByNetId.get(a.netId);
         if (!username) continue;
 
-        if (a.githubAccessConfirmed) {
-          alreadyConfirmed++;
+        if (currentCollaborators.includes(username)) {
+          confirmed++;
+          if (
+            a.githubAccessConfirmed !== true ||
+            a.githubInviteSentAt !== null
+          ) {
+            await prisma.projectRepoAssignment.update({
+              where: { id: a.id },
+              data: {
+                githubAccessConfirmed: true,
+                githubInviteSentAt: null,
+              },
+            });
+          }
           continue;
         }
 
-        if (currentCollaborators.includes(username)) {
-          confirmed++;
-        } else {
-          await retryAsync(
-            addCollaborator,
-            { retries: 3, delayMs: 2000 },
-            course.githubOrg,
-            repoName,
-            username,
-            course.githubToken,
-          );
-          added++;
-          logger.info(
-            { netId: a.netId, username, repoName },
-            "Added collaborator",
-          );
+        if (openInviteLogins.includes(username)) {
+          // Invitation open on GitHub, awaiting acceptance. Don't re-PUT:
+          // the 50-invitations/repo/24h cap makes blind refreshes costly.
+          pendingInvites++;
+          if (
+            a.githubAccessConfirmed !== false ||
+            a.githubInviteSentAt === null
+          ) {
+            await prisma.projectRepoAssignment.update({
+              where: { id: a.id },
+              data: {
+                githubAccessConfirmed: false,
+                githubInviteSentAt: a.githubInviteSentAt ?? new Date(),
+              },
+            });
+          }
+          continue;
         }
 
+        // No access and no open invite: never invited, or the invite
+        // expired/was declined before acceptance. PUT sends a fresh
+        // invitation (201) or grants directly (204) if access raced into
+        // existence.
+        const status = await retryAsync(
+          addCollaborator,
+          { retries: 3, delayMs: 2000 },
+          course.githubOrg,
+          repoName,
+          username,
+          course.githubToken,
+        );
+        if (status === 204) {
+          confirmed++;
+          await prisma.projectRepoAssignment.update({
+            where: { id: a.id },
+            data: {
+              githubAccessConfirmed: true,
+              githubInviteSentAt: null,
+            },
+          });
+          continue;
+        }
+        if (a.githubAccessConfirmed) {
+          reinvited++;
+          logger.info(
+            { netId: a.netId, username, repoName },
+            "Re-invited collaborator (prior invite expired or declined)",
+          );
+        } else {
+          added++;
+          logger.info({ netId: a.netId, username, repoName }, "Added collaborator");
+        }
         await prisma.projectRepoAssignment.update({
           where: { id: a.id },
-          data: { githubAccessConfirmed: true },
+          data: {
+            githubAccessConfirmed: false,
+            githubInviteSentAt: new Date(),
+          },
         });
       }
 
@@ -283,9 +393,10 @@ async function main() {
   }
 
   console.log(`\nGitHub access sync complete for course '${courseId}':`);
-  console.log(`  Already confirmed: ${alreadyConfirmed}`);
-  console.log(`  Found existing collaborator: ${confirmed}`);
-  console.log(`  Newly added: ${added}`);
+  console.log(`  Verified direct collaborator: ${confirmed}`);
+  console.log(`  Invite awaiting acceptance: ${pendingInvites}`);
+  console.log(`  Newly invited: ${added}`);
+  console.log(`  Re-invited (prior invite expired/declined): ${reinvited}`);
   console.log(`  Stale collaborators removed: ${removed}`);
   console.log(`  No username mapping: ${noMapping}`);
   console.log(`  Failed: ${failed}`);

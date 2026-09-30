@@ -424,12 +424,21 @@ function AssignmentContent({
                       {assignmentData.projectRepo.repoName}
                     </a>
                     <br />
-                    {assignmentData.projectRepo.accessPending && (
-                      <p className="text-warning mt-2 mb-2">
-                        GitHub access not yet confirmed. If you cannot view the
-                        repository, please contact course staff to sync access.
-                      </p>
-                    )}
+                    {assignmentData.projectRepo.accessPending &&
+                      (assignmentData.projectRepo.invitePending ? (
+                        <p className="text-info mt-2 mb-2">
+                          A GitHub invitation for this repository has been sent
+                          to you. Check your email or GitHub notifications and
+                          accept the invite to gain access — it expires after 7
+                          days, after which course staff can re-send it.
+                        </p>
+                      ) : (
+                        <p className="text-warning mt-2 mb-2">
+                          GitHub access not yet set up. If you cannot view the
+                          repository, please contact course staff to sync
+                          access.
+                        </p>
+                      ))}
                   </>
                 )}
                 {assignmentData.projectRepo === null && (
@@ -505,11 +514,16 @@ function AssignmentContent({
                               {repo.repoName}
                             </a>{" "}
                             <Badge bg="secondary">{repo.projectKey}</Badge>
-                            {repo.accessPending && (
-                              <Badge bg="warning" text="dark" className="ms-1">
-                                access pending
-                              </Badge>
-                            )}
+                            {repo.accessPending &&
+                              (repo.invitePending ? (
+                                <Badge bg="info" className="ms-1">
+                                  invite pending
+                                </Badge>
+                              ) : (
+                                <Badge bg="warning" text="dark" className="ms-1">
+                                  access pending
+                                </Badge>
+                              ))}
                           </li>
                         ))}
                       </ul>

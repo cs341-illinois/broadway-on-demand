@@ -72,6 +72,9 @@ const assignmentEntry = z.object({
   partnerGroupId: z.string().nullable(),
   assignedAt: z.string(),
   githubAccessConfirmed: z.boolean(),
+  // ISO timestamp when an invitation was last observed open on GitHub
+  // (awaiting acceptance); null means never invited / no open invite.
+  githubInviteSentAt: z.string().nullable(),
 });
 
 const projectReposStatusResponse = z.object({
@@ -238,6 +241,7 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
               assignedAt: true,
               releasedAt: true,
               githubAccessConfirmed: true,
+              githubInviteSentAt: true,
             },
           }),
           fastify.prismaClient.partnerGroup.findMany({
@@ -408,6 +412,7 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
           partnerGroupId: a.sourcePartnerGroupId ?? null,
           assignedAt: a.assignedAt.toISOString(),
           githubAccessConfirmed: a.githubAccessConfirmed,
+          githubInviteSentAt: a.githubInviteSentAt?.toISOString() ?? null,
         }))
         .sort(
           (a, b) =>
@@ -923,13 +928,15 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
           continue;
         }
         try {
-          await addRepoCollaborator({
+          const { added: freshInvite } = await addRepoCollaborator({
             githubToken: course.githubToken,
             orgName: repoOrg,
             repoName: r.repoName,
             username,
             logger: request.log,
           });
+          // 201 = fresh invitation created (awaiting acceptance); 204 = the
+          // user already had direct access.
           await fastify.prismaClient.projectRepoAssignment.updateMany({
             where: {
               courseId,
@@ -938,7 +945,9 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
               repoName: r.repoName,
               releasedAt: null,
             },
-            data: { githubAccessConfirmed: true },
+            data: freshInvite
+              ? { githubAccessConfirmed: false, githubInviteSentAt: new Date() }
+              : { githubAccessConfirmed: true, githubInviteSentAt: null },
           });
           grantResults.push({
             ...r,
@@ -1045,6 +1054,8 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
           200: z.object({
             confirmed: z.number(),
             added: z.number(),
+            reinvited: z.number(),
+            pendingInvites: z.number(),
             removed: z.number(),
             noMapping: z.number(),
             failed: z.number(),
@@ -1090,6 +1101,7 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
             netId: true,
             repoName: true,
             githubAccessConfirmed: true,
+            githubInviteSentAt: true,
           },
         });
 
@@ -1120,6 +1132,8 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
 
       let confirmed = 0;
       let added = 0;
+      let reinvited = 0;
+      let pendingInvites = 0;
       let removed = 0;
       let noMapping = 0;
       let failed = 0;
@@ -1159,37 +1173,127 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
             await sleep(300);
           }
 
-          // Add missing assigned students
+          // List currently open invitations for the repo. Expired invites
+          // vanish from this list, so a student absent from both the
+          // collaborator list and this set has no live access path — the
+          // signal that a fresh invite must be sent.
+          const openInviteLogins = new Set<string>();
+          let invitePage = 1;
+          while (true) {
+            const invRes = await fetch(
+              `https://api.github.com/repos/${repoOrg}/${repoName}/invitations?per_page=100&page=${invitePage}`,
+              { headers: ghHeaders },
+            );
+            if (invRes.status !== 200) {
+              throw new Error(`List invitations failed: ${invRes.status}`);
+            }
+            const invites = (await invRes.json()) as {
+              invitee: { login: string } | null;
+              expired: boolean;
+            }[];
+            for (const inv of invites) {
+              // Defensive: an entry can (rarely) carry expired:true — treat it
+              // as not open so the re-invite branch fires instead.
+              if (inv.invitee && !inv.expired) {
+                openInviteLogins.add(inv.invitee.login);
+              }
+            }
+            if (invites.length < 100) break;
+            invitePage++;
+            await sleep(300);
+          }
+
+          // Reconcile each assigned student's access state against GitHub.
+          // githubAccessConfirmed is derived state meaning "verified direct
+          // collaborator"; githubInviteSentAt means "invitation open, awaiting
+          // acceptance". A student in neither state gets a fresh PUT — this is
+          // what re-sends invites that expired before acceptance.
           for (const a of repoAssignments) {
             const username = usernameByNetId.get(a.netId);
             if (!username) continue;
 
-            if (a.githubAccessConfirmed) {
+            if (currentCollaborators.includes(username)) {
+              // Verified direct collaborator.
               confirmed++;
+              if (
+                a.githubAccessConfirmed !== true ||
+                a.githubInviteSentAt !== null
+              ) {
+                await fastify.prismaClient.projectRepoAssignment.update({
+                  where: { id: a.id },
+                  data: {
+                    githubAccessConfirmed: true,
+                    githubInviteSentAt: null,
+                  },
+                });
+              }
+              await sleep(300);
               continue;
             }
 
-            if (currentCollaborators.includes(username)) {
-              confirmed++;
-            } else {
-              const addRes = await fetch(
-                `https://api.github.com/repos/${repoOrg}/${repoName}/collaborators/${username}`,
-                {
-                  method: "PUT",
-                  headers: { ...ghHeaders, "Content-Type": "application/json" },
-                  body: JSON.stringify({ permission: "push" }),
-                },
-              );
-              if (addRes.status !== 201 && addRes.status !== 204) {
-                throw new Error(`Add failed: ${addRes.status} for ${username}`);
+            if (openInviteLogins.has(username)) {
+              // Invitation open on GitHub, awaiting acceptance. Don't re-PUT:
+              // the 50-invitations/repo/24h cap makes blind refreshes costly.
+              pendingInvites++;
+              if (
+                a.githubAccessConfirmed !== false ||
+                a.githubInviteSentAt === null
+              ) {
+                await fastify.prismaClient.projectRepoAssignment.update({
+                  where: { id: a.id },
+                  data: {
+                    githubAccessConfirmed: false,
+                    githubInviteSentAt: a.githubInviteSentAt ?? new Date(),
+                  },
+                });
               }
-              added++;
-              currentCollaborators.push(username);
+              await sleep(300);
+              continue;
             }
 
+            // No access and no open invite: never invited, or the invite
+            // expired/was declined before acceptance. Re-PUT sends a fresh
+            // invitation (201) — the healing path for expired invites — or
+            // grants directly (204) if access raced into existence.
+            const addRes = await fetch(
+              `https://api.github.com/repos/${repoOrg}/${repoName}/collaborators/${username}`,
+              {
+                method: "PUT",
+                headers: { ...ghHeaders, "Content-Type": "application/json" },
+                body: JSON.stringify({ permission: "push" }),
+              },
+            );
+            if (addRes.status === 204) {
+              confirmed++;
+              currentCollaborators.push(username);
+              await fastify.prismaClient.projectRepoAssignment.update({
+                where: { id: a.id },
+                data: {
+                  githubAccessConfirmed: true,
+                  githubInviteSentAt: null,
+                },
+              });
+              await sleep(300);
+              continue;
+            }
+            if (addRes.status !== 201) {
+              throw new Error(`Add failed: ${addRes.status} for ${username}`);
+            }
+            if (a.githubAccessConfirmed) {
+              reinvited++;
+              request.log.info(
+                { netId: a.netId, username, repoName },
+                "Re-invited collaborator (prior invite expired or declined)",
+              );
+            } else {
+              added++;
+            }
             await fastify.prismaClient.projectRepoAssignment.update({
               where: { id: a.id },
-              data: { githubAccessConfirmed: true },
+              data: {
+                githubAccessConfirmed: false,
+                githubInviteSentAt: new Date(),
+              },
             });
             await sleep(300);
           }
@@ -1228,6 +1332,8 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
           projectKey,
           confirmed,
           added,
+          reinvited,
+          pendingInvites,
           removed,
           noMapping,
           failed,
@@ -1239,6 +1345,8 @@ const projectRepoRoutes: FastifyPluginAsync = async (fastify, _options) => {
       return reply.status(200).send({
         confirmed,
         added,
+        reinvited,
+        pendingInvites,
         removed,
         noMapping,
         failed,

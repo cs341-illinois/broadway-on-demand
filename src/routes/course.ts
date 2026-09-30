@@ -273,7 +273,12 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
         (projectKey && orgByProjectKey.get(projectKey)) || githubOrg;
       let repoOrg = githubOrg;
       let projectRepo:
-        | { repoName: string; repoUrl: string; accessPending: boolean }
+        | {
+            repoName: string;
+            repoUrl: string;
+            accessPending: boolean;
+            invitePending: boolean;
+          }
         | null
         | undefined = undefined;
       if (
@@ -288,7 +293,11 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
               netId,
               releasedAt: null,
             },
-            select: { repoName: true, githubAccessConfirmed: true },
+            select: {
+              repoName: true,
+              githubAccessConfirmed: true,
+              githubInviteSentAt: true,
+            },
           });
         if (projectRepoAssignment) {
           repoName = projectRepoAssignment.repoName;
@@ -297,6 +306,9 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
             repoName: projectRepoAssignment.repoName,
             repoUrl: `https://github.com/${repoOrg}/${projectRepoAssignment.repoName}`,
             accessPending: !projectRepoAssignment.githubAccessConfirmed,
+            invitePending:
+              !projectRepoAssignment.githubAccessConfirmed &&
+              projectRepoAssignment.githubInviteSentAt !== null,
           };
         } else {
           projectRepo = null;
@@ -312,6 +324,7 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
           select: {
             repoName: true,
             githubAccessConfirmed: true,
+            githubInviteSentAt: true,
             projectKey: true,
             releasedAt: true,
           },
@@ -321,6 +334,8 @@ const courseRoutes: FastifyPluginAsync = async (fastify, _options) => {
         repoName: r.repoName,
         repoUrl: `https://github.com/${orgForKey(r.projectKey)}/${r.repoName}`,
         accessPending: !r.githubAccessConfirmed,
+        invitePending:
+          !r.githubAccessConfirmed && r.githubInviteSentAt !== null,
         projectKey: r.projectKey,
       }));
       let latestCommit: Promise<{
