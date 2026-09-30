@@ -1,9 +1,19 @@
 import { FastifyPluginAsync } from "fastify";
 import { FastifyZodOpenApiTypeProvider } from "fastify-zod-openapi";
 import { z } from "zod";
-import { Category, GradingMode, Role } from "../generated/prisma/client.js";
+import {
+  AssignmentQuota,
+  AssignmentVisibility,
+  Category,
+  GradingMode,
+  Role,
+} from "../generated/prisma/client.js";
 import { getGroupForStudent } from "../functions/partners.js";
 import { getCourseRoles, getUserRolesByNetId } from "../functions/userData.js";
+import {
+  createAssignmentWithFinalGradingJob,
+  deleteAssignmentInTransaction,
+} from "../functions/assignment.js";
 import {
   BaseError,
   DatabaseFetchError,
@@ -615,6 +625,282 @@ const projectGradesRoutes: FastifyPluginAsync = async (fastify, _options) => {
           });
         });
 
+      return reply.status(200).send();
+    },
+  );
+
+  const componentSyncItemSchema = z.object({
+    // Present = update an existing component; absent = create a new one.
+    assignmentId: z.string().min(1).optional(),
+    name: z.string(),
+    gradingMode: z.enum(["AUTOGRADED", "MANUAL"]),
+    weight: z.number().min(0),
+  });
+
+  const syncComponentsBodySchema = z.object({
+    components: z.array(componentSyncItemSchema).min(1),
+  });
+
+  fastify.withTypeProvider<FastifyZodOpenApiTypeProvider>().put(
+    "/:courseId/:projectKey/components",
+    {
+      onRequest: async (request, reply) => {
+        await fastify.authorize(request, reply, request.params.courseId, [
+          Role.ADMIN,
+        ]);
+      },
+      schema: {
+        params: projectKeyParamsSchema,
+        body: syncComponentsBodySchema,
+        response: {
+          200: z.null(),
+        },
+      },
+    },
+    async (request, reply) => {
+      const { courseId, projectKey } = request.params;
+      const { components } = request.body;
+
+      // --- payload validation ---
+      const trimmedNames = components.map((c) => c.name.trim());
+      for (const [i, name] of trimmedNames.entries()) {
+        if (!components[i].assignmentId && !name) {
+          throw new ValidationError({
+            message: "Every new component must have a name.",
+          });
+        }
+      }
+      const totalWeight = components.reduce((sum, c) => sum + c.weight, 0);
+      if (Math.abs(totalWeight - 100) > 0.001) {
+        throw new ValidationError({
+          message: `Weights must sum to 100 (currently ${totalWeight}).`,
+        });
+      }
+
+      // --- load existing components ---
+      const existing = await fastify.prismaClient.assignment
+        .findMany({
+          where: { courseId, projectKey, category: Category.PROJECT },
+          select: {
+            id: true,
+            name: true,
+            gradingMode: true,
+            partnerRoundNumber: true,
+            quotaAmount: true,
+            quotaPeriod: true,
+            visibility: true,
+            openAt: true,
+            finalGradingRunId: true,
+          },
+        })
+        .catch((e) => {
+          request.log.error(e);
+          throw new DatabaseFetchError({
+            message: "Failed to fetch project components.",
+          });
+        });
+      if (existing.length === 0) {
+        throw new ValidationError({
+          message: `Project "${projectKey}" not found.`,
+        });
+      }
+
+      const existingById = new Map(existing.map((a) => [a.id, a]));
+      const referencedIds = new Set<string>();
+      for (const c of components) {
+        if (!c.assignmentId) continue;
+        if (referencedIds.has(c.assignmentId)) {
+          throw new ValidationError({
+            message: `Component ${c.assignmentId} appears more than once in the request.`,
+          });
+        }
+        if (!existingById.has(c.assignmentId)) {
+          throw new ValidationError({
+            message: `Assignment ${c.assignmentId} does not belong to project ${projectKey}.`,
+          });
+        }
+        referencedIds.add(c.assignmentId);
+      }
+
+      const kept = existing.filter((a) => referencedIds.has(a.id));
+      const removed = existing.filter((a) => !referencedIds.has(a.id));
+      const additions = components
+        .map((c, i) => ({ ...c, trimmedName: trimmedNames[i] }))
+        .filter((c) => !c.assignmentId);
+
+      // --- invariants ---
+      const autogradedCount =
+        kept.filter((a) => a.gradingMode === GradingMode.AUTOGRADED).length +
+        additions.filter((c) => c.gradingMode === "AUTOGRADED").length;
+      if (autogradedCount === 0) {
+        throw new ValidationError({
+          message:
+            "At least one component must be autograded (for repo assignment).",
+        });
+      }
+
+      // Derived component IDs must be unique across kept rows and each other.
+      const slugify = (name: string) =>
+        name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+      const takenIds = new Set(kept.map((a) => a.id));
+      const additionsWithIds = additions.map((c) => {
+        const slug = slugify(c.trimmedName);
+        if (!slug) {
+          throw new ValidationError({
+            message: `Component name "${c.trimmedName}" must contain letters or numbers.`,
+          });
+        }
+        const id = `${projectKey}-${slug}`;
+        if (takenIds.has(id)) {
+          throw new ValidationError({
+            message: `Component names must be unique — "${c.trimmedName}" would reuse ID "${id}".`,
+          });
+        }
+        takenIds.add(id);
+        return { ...c, id };
+      });
+
+      // --- removal guardrails: block components with grade/extension history ---
+      const removedIds = removed.map((a) => a.id);
+      if (removedIds.length > 0) {
+        const gradedRows = await fastify.prismaClient.publishedGrades
+          .findMany({
+            where: { courseId, assignmentId: { in: removedIds } },
+            select: { assignmentId: true },
+            distinct: ["assignmentId"],
+          })
+          .catch((e) => {
+            request.log.error(e);
+            throw new DatabaseFetchError({
+              message: "Failed to check existing grades.",
+            });
+          });
+        const extensionRows = await fastify.prismaClient.extensionUsageHistory
+          .findMany({
+            where: { courseId, assignmentId: { in: removedIds } },
+            select: { assignmentId: true },
+            distinct: ["assignmentId"],
+          })
+          .catch((e) => {
+            request.log.error(e);
+            throw new DatabaseFetchError({
+              message: "Failed to check existing extensions.",
+            });
+          });
+        const blockedIds = new Set([
+          ...gradedRows.map((g) => g.assignmentId),
+          ...extensionRows.map((x) => x.assignmentId),
+        ]);
+        const blockedNames = removed
+          .filter((a) => blockedIds.has(a.id))
+          .map((a) => a.name);
+        if (blockedNames.length > 0) {
+          throw new ValidationError({
+            message: `Cannot remove component(s) with existing grade or extension records: ${blockedNames.join(", ")}.`,
+          });
+        }
+      }
+
+      // --- inheritance template from an existing AG component ---
+      const agTemplate =
+        kept.find((a) => a.gradingMode === GradingMode.AUTOGRADED) ??
+        existing.find((a) => a.gradingMode === GradingMode.AUTOGRADED) ??
+        null;
+      let agTemplateDueAt: Date | null = null;
+      if (agTemplate?.finalGradingRunId) {
+        const job = await fastify.prismaClient.job
+          .findUnique({
+            where: { id: agTemplate.finalGradingRunId },
+            select: { dueAt: true },
+          })
+          .catch((e) => {
+            request.log.error(e);
+            throw new DatabaseFetchError({
+              message: "Failed to fetch the project's final grading run.",
+            });
+          });
+        agTemplateDueAt = job?.dueAt ?? null;
+      }
+
+      // --- apply in one transaction ---
+      try {
+        await fastify.prismaClient.$transaction(async (tx) => {
+          for (const a of removed) {
+            await deleteAssignmentInTransaction({
+              tx,
+              courseId,
+              assignmentId: a.id,
+              logger: request.log,
+            });
+          }
+          for (const c of additionsWithIds) {
+            const name = `${projectKey}: ${c.trimmedName}`;
+            if (c.gradingMode === "AUTOGRADED") {
+              // Inherit the sibling AG due date; if it has already passed,
+              // fall back to a two-week window so the new final grading run
+              // doesn't fire immediately.
+              const now = new Date();
+              const dueAt =
+                agTemplateDueAt && agTemplateDueAt > now
+                  ? agTemplateDueAt
+                  : new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+              await createAssignmentWithFinalGradingJob({
+                tx,
+                courseId,
+                assignmentId: c.id,
+                name,
+                dueAt,
+                visibility: agTemplate?.visibility ?? AssignmentVisibility.DEFAULT,
+                quotaAmount: agTemplate?.quotaAmount ?? 3,
+                quotaPeriod: agTemplate?.quotaPeriod ?? AssignmentQuota.TOTAL,
+                openAt: agTemplate?.openAt ?? now,
+                category: Category.PROJECT,
+                studentExtendable: false,
+                partnerRoundNumber:
+                  agTemplate?.partnerRoundNumber ?? existing[0].partnerRoundNumber,
+                projectKey,
+              });
+            } else {
+              await tx.assignment.create({
+                data: {
+                  courseId,
+                  id: c.id,
+                  name,
+                  category: Category.PROJECT,
+                  visibility:
+                    agTemplate?.visibility ?? AssignmentVisibility.DEFAULT,
+                  projectKey,
+                  gradingMode: GradingMode.MANUAL,
+                  weight: c.weight,
+                  quotaAmount: 0,
+                  quotaPeriod: AssignmentQuota.TOTAL,
+                  studentExtendable: false,
+                  openAt: agTemplate?.openAt ?? new Date(),
+                  partnerRoundNumber:
+                    existing[0].partnerRoundNumber ?? null,
+                },
+              });
+            }
+          }
+          for (const c of components) {
+            if (!c.assignmentId) continue;
+            await tx.assignment.update({
+              where: { courseId_id: { courseId, id: c.assignmentId } },
+              data: { weight: c.weight },
+            });
+          }
+        });
+      } catch (e) {
+        if (e instanceof BaseError) {
+          throw e;
+        }
+        request.log.error(e);
+        throw new DatabaseInsertError({
+          message: "Failed to update project components.",
+        });
+      }
+
+      await fastify.scheduler.refreshJobs();
       return reply.status(200).send();
     },
   );

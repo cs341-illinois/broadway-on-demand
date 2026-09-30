@@ -48,8 +48,19 @@ type DeleteAssignmentInput = {
   scheduler: JobScheduler;
 };
 
-export async function createAssignment({
-  client,
+type CreateAssignmentRowInput = Omit<CreateAssignmentInput, "client"> & {
+  tx: Prisma.TransactionClient;
+};
+
+type DeleteAssignmentRowInput = Omit<DeleteAssignmentInput, "client" | "scheduler"> & {
+  tx: Prisma.TransactionClient;
+};
+
+// Creates the assignment row plus its paired FINAL_GRADING job. Runs inside
+// the caller's transaction so it can be composed with other writes (e.g. the
+// project-component sync endpoint).
+export async function createAssignmentWithFinalGradingJob({
+  tx,
   courseId,
   assignmentId,
   name,
@@ -63,69 +74,72 @@ export async function createAssignment({
   studentExtendable,
   partnerRoundNumber,
   projectKey,
-}: CreateAssignmentInput) {
-  await client
-    .$transaction(async (tx) => {
-      const jobRepo = new PrismaJobRepository(tx);
-      const assignment = await tx.assignment
-        .create({
-          data: {
-            id: assignmentId,
-            name,
-            courseId,
-            visibility,
-            quotaAmount,
-            quotaPeriod,
-            openAt,
-            category,
-            jenkinsPipelineName,
-            studentExtendable,
-            partnerRoundNumber,
-            projectKey,
-            gradingMode: "AUTOGRADED",
-          },
-        })
-        .catch((e) => {
-          throw new DatabaseInsertError({
-            message: "Could not insert assignment.",
-          });
-        });
-      const { id: jobId } = await jobRepo
-        .createJob({
-          name: "runScheduledGradingJob",
-          dueAt,
-          scheduledAt: new Date(dueAt.getTime() + 5 * 60000), // schedule 5 minutes after the due time to avoid race conditions
-          courseId: courseId,
-          assignmentId: assignmentId,
-          type: JobType.FINAL_GRADING,
-          netId: ["_ALL_"],
-        })
-        .catch((e) => {
-          throw new DatabaseInsertError({
-            message: "Could not schedule grading job.",
-          });
-        });
-      await tx.assignment
-        .update({
-          where: {
-            courseId_id: {
-              courseId: courseId,
-              id: assignment.id,
-            },
-          },
-          data: {
-            finalGradingRunId: jobId,
-          },
-        })
-        .catch((e) => {
-          throw new DatabaseInsertError({
-            message: "Could not pair grading job.",
-          });
-        });
+}: CreateAssignmentRowInput) {
+  const jobRepo = new PrismaJobRepository(tx);
+  const assignment = await tx.assignment
+    .create({
+      data: {
+        id: assignmentId,
+        name,
+        courseId,
+        visibility,
+        quotaAmount,
+        quotaPeriod,
+        openAt,
+        category,
+        jenkinsPipelineName,
+        studentExtendable,
+        partnerRoundNumber,
+        projectKey,
+        gradingMode: "AUTOGRADED",
+      },
     })
     .catch((e) => {
-      throw e;
+      throw new DatabaseInsertError({
+        message: "Could not insert assignment.",
+      });
     });
+  const { id: jobId } = await jobRepo
+    .createJob({
+      name: "runScheduledGradingJob",
+      dueAt,
+      scheduledAt: new Date(dueAt.getTime() + 5 * 60000), // schedule 5 minutes after the due time to avoid race conditions
+      courseId: courseId,
+      assignmentId: assignmentId,
+      type: JobType.FINAL_GRADING,
+      netId: ["_ALL_"],
+    })
+    .catch((e) => {
+      throw new DatabaseInsertError({
+        message: "Could not schedule grading job.",
+      });
+    });
+  await tx.assignment
+    .update({
+      where: {
+        courseId_id: {
+          courseId: courseId,
+          id: assignment.id,
+        },
+      },
+      data: {
+        finalGradingRunId: jobId,
+      },
+    })
+    .catch((e) => {
+      throw new DatabaseInsertError({
+        message: "Could not pair grading job.",
+      });
+    });
+}
+
+export async function createAssignment({
+  client,
+  ...rest
+}: CreateAssignmentInput) {
+  await client.$transaction((tx) =>
+    createAssignmentWithFinalGradingJob({ tx, ...rest }),
+  );
 }
 
 export async function modifyAssignment({
@@ -240,6 +254,59 @@ export async function modifyAssignment({
   });
 }
 
+// Deletes the assignment row and its scheduled jobs. Runs inside the caller's
+// transaction so it can be composed with other writes.
+export async function deleteAssignmentInTransaction({
+  tx,
+  courseId,
+  assignmentId,
+  logger,
+}: DeleteAssignmentRowInput) {
+  const res = await tx.assignment
+    .delete({
+      where: {
+        courseId_id: {
+          courseId,
+          id: assignmentId,
+        },
+      },
+      select: {
+        finalGradingRunId: true,
+      },
+    })
+    .catch((e) => {
+      logger.error(e);
+      let message = "Could not delete assignment entry.";
+      if (
+        e instanceof Prisma.PrismaClientKnownRequestError &&
+        e.code === "P2003"
+      ) {
+        message =
+          "This assignment cannot be deleted due to existing data. You may close the assignment instead.";
+      }
+      throw new DatabaseDeleteError({
+        message,
+      });
+    });
+  if (!res.finalGradingRunId) {
+    return;
+  }
+  const jobStore = new PrismaJobRepository(tx);
+  await jobStore.deleteJob(res.finalGradingRunId);
+  await tx.job
+    .deleteMany({
+      where: {
+        courseId,
+        assignmentId,
+      },
+    })
+    .catch((e) => {
+      throw new DatabaseDeleteError({
+        message: "Could not delete scheduled jobs.",
+      });
+    });
+}
+
 export async function deleteAssignment({
   client,
   courseId,
@@ -247,51 +314,9 @@ export async function deleteAssignment({
   logger,
   scheduler,
 }: DeleteAssignmentInput) {
-  await client.$transaction(async (tx) => {
-    const res = await tx.assignment
-      .delete({
-        where: {
-          courseId_id: {
-            courseId,
-            id: assignmentId,
-          },
-        },
-        select: {
-          finalGradingRunId: true,
-        },
-      })
-      .catch((e) => {
-        logger.error(e);
-        let message = "Could not delete assignment entry.";
-        if (
-          e instanceof Prisma.PrismaClientKnownRequestError &&
-          e.code === "P2003"
-        ) {
-          message =
-            "This assignment cannot be deleted due to existing data. You may close the assignment instead.";
-        }
-        throw new DatabaseDeleteError({
-          message,
-        });
-      });
-    if (!res.finalGradingRunId) {
-      return;
-    }
-    const jobStore = new PrismaJobRepository(tx);
-    await jobStore.deleteJob(res.finalGradingRunId);
-    await tx.job
-      .deleteMany({
-        where: {
-          courseId,
-          assignmentId,
-        },
-      })
-      .catch((e) => {
-        throw new DatabaseDeleteError({
-          message: "Could not delete scheduled jobs.",
-        });
-      });
-  });
+  await client.$transaction((tx) =>
+    deleteAssignmentInTransaction({ tx, courseId, assignmentId, logger }),
+  );
   await scheduler.refreshJobs();
 }
 

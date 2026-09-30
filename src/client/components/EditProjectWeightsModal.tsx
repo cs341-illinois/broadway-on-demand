@@ -10,7 +10,8 @@ interface ProjectComponent {
 }
 
 interface ComponentDraft {
-  assignmentId: string;
+  key: string;
+  assignmentId?: string;
   name: string;
   gradingMode: "AUTOGRADED" | "MANUAL";
   weight: string;
@@ -23,6 +24,8 @@ interface EditProjectWeightsModalProps {
   projectKey: string;
   onSuccess?: () => void;
 }
+
+let draftCounter = 0;
 
 export default function EditProjectWeightsModal({
   show,
@@ -59,6 +62,7 @@ export default function EditProjectWeightsModal({
         if (!cancelled) {
           setComponents(
             project.components.map((c) => ({
+              key: c.assignmentId,
               assignmentId: c.assignmentId,
               name: c.name,
               gradingMode: c.gradingMode,
@@ -80,44 +84,84 @@ export default function EditProjectWeightsModal({
     };
   }, [show, courseId, projectKey]);
 
-  const updateWeight = (assignmentId: string, value: string) => {
+  const updateDraft = (
+    key: string,
+    field: "name" | "gradingMode" | "weight",
+    value: string,
+  ) => {
     setComponents(
       components.map((c) =>
-        c.assignmentId === assignmentId ? { ...c, weight: value } : c,
+        c.key === key ? { ...c, [field]: value } : c,
       ),
     );
   };
 
+  const addDraft = () => {
+    setComponents([
+      ...components,
+      {
+        key: `draft-${++draftCounter}`,
+        name: "",
+        gradingMode: "MANUAL",
+        weight: "",
+      },
+    ]);
+  };
+
+  const removeRow = (key: string) => {
+    setComponents(components.filter((c) => c.key !== key));
+  };
+
   const onSubmit = async () => {
     setError(null);
-    const parsed = components.map((c) => ({
-      assignmentId: c.assignmentId,
-      weight: c.weight === "" ? NaN : Number(c.weight),
-    }));
-    for (const c of parsed) {
-      if (Number.isNaN(c.weight) || c.weight < 0) {
+    if (components.length === 0) {
+      setError("A project must have at least one component.");
+      return;
+    }
+    const parsedWeights: number[] = [];
+    for (const c of components) {
+      if (!c.assignmentId && !c.name.trim()) {
+        setError("Every new component must have a name.");
+        return;
+      }
+      const w = c.weight === "" ? NaN : Number(c.weight);
+      if (Number.isNaN(w) || w < 0) {
         setError("Weights must be non-negative numbers.");
         return;
       }
+      parsedWeights.push(w);
     }
-    const total = parsed.reduce((sum, c) => sum + c.weight, 0);
-    if (Math.abs(total - 100) > 0.001) {
-      setError(`Weights must sum to 100 (currently ${total}).`);
+    if (!components.some((c) => c.gradingMode === "AUTOGRADED")) {
+      setError("At least one component must be autograded (for repo assignment).");
+      return;
+    }
+    const totalWeight = parsedWeights.reduce((sum, w) => sum + w, 0);
+    if (Math.abs(totalWeight - 100) > 0.001) {
+      setError(`Weights must sum to 100 (currently ${totalWeight}).`);
       return;
     }
     setSaving(true);
     try {
       const res = await fetch(
-        formulateUrl(`api/v1/projectGrades/${courseId}/${projectKey}/weights`),
+        formulateUrl(
+          `api/v1/projectGrades/${courseId}/${projectKey}/components`,
+        ),
         {
-          method: "PATCH",
+          method: "PUT",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ components: parsed }),
+          body: JSON.stringify({
+            components: components.map((c, i) => ({
+              ...(c.assignmentId ? { assignmentId: c.assignmentId } : {}),
+              name: c.name.trim(),
+              gradingMode: c.gradingMode,
+              weight: parsedWeights[i],
+            })),
+          }),
         },
       );
       if (!res.ok) {
-        let message = `Failed to update weights (status ${res.status}).`;
+        let message = `Failed to update components (status ${res.status}).`;
         try {
           const data = await res.json();
           message = data.message || message;
@@ -149,25 +193,57 @@ export default function EditProjectWeightsModal({
         {!loading && components.length > 0 && (
           <>
             <p className="text-muted">
-              Adjust the weight (%) of each component. Weights must sum to 100
-              when saving.
+              Adjust weights, add new components (autograded or manual), or
+              remove components. Weights must sum to 100 when saving. Removing
+              a component that already has grades or extensions is blocked.
             </p>
             <Table bordered size="sm" className="mb-2">
               <thead>
                 <tr>
-                  <th style={{ width: "45%" }}>Name</th>
-                  <th style={{ width: "30%" }}>Grading Mode</th>
-                  <th style={{ width: "25%" }}>Weight (%)</th>
+                  <th style={{ width: "35%" }}>Name</th>
+                  <th style={{ width: "22%" }}>Grading Mode</th>
+                  <th style={{ width: "23%" }}>Weight (%)</th>
+                  <th style={{ width: "20%" }}></th>
                 </tr>
               </thead>
               <tbody>
                 {components.map((c) => (
-                  <tr key={c.assignmentId}>
-                    <td>{c.name}</td>
+                  <tr key={c.key}>
                     <td>
-                      {c.gradingMode === "AUTOGRADED"
-                        ? "Autograded"
-                        : "Manual"}
+                      {c.assignmentId ? (
+                        c.name
+                      ) : (
+                        <Form.Control
+                          size="sm"
+                          placeholder="e.g. Manual Enter"
+                          value={c.name}
+                          onChange={(e) =>
+                            updateDraft(c.key, "name", e.target.value)
+                          }
+                          disabled={saving}
+                        />
+                      )}
+                    </td>
+                    <td>
+                      {c.assignmentId ? (
+                        c.gradingMode === "AUTOGRADED" ? (
+                          "Autograded"
+                        ) : (
+                          "Manual"
+                        )
+                      ) : (
+                        <Form.Select
+                          size="sm"
+                          value={c.gradingMode}
+                          onChange={(e) =>
+                            updateDraft(c.key, "gradingMode", e.target.value)
+                          }
+                          disabled={saving}
+                        >
+                          <option value="AUTOGRADED">Autograded</option>
+                          <option value="MANUAL">Manual</option>
+                        </Form.Select>
+                      )}
                     </td>
                     <td>
                       <Form.Control
@@ -177,15 +253,33 @@ export default function EditProjectWeightsModal({
                         max={100}
                         value={c.weight}
                         onChange={(e) =>
-                          updateWeight(c.assignmentId, e.target.value)
+                          updateDraft(c.key, "weight", e.target.value)
                         }
                         disabled={saving}
                       />
+                    </td>
+                    <td className="text-center">
+                      <Button
+                        size="sm"
+                        variant="outline-danger"
+                        onClick={() => removeRow(c.key)}
+                        disabled={saving}
+                      >
+                        Remove
+                      </Button>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </Table>
+            <Button
+              size="sm"
+              variant="outline-primary"
+              onClick={addDraft}
+              disabled={saving}
+            >
+              + Add Component
+            </Button>
           </>
         )}
         {!loading && components.length === 0 && !error && (
@@ -217,7 +311,7 @@ export default function EditProjectWeightsModal({
               Saving...
             </>
           ) : (
-            "Save Weights"
+            "Save Breakdown"
           )}
         </Button>
       </Modal.Footer>
