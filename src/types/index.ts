@@ -33,7 +33,7 @@ export const courseDateString = z
   })
   .pipe(z.string());
 
-export const netIdSchema = z.string().min(3).max(8);
+export const netIdSchema = z.string().min(3);
 export const uinSchema = z
   .string()
   .regex(/^\d{9}$/, "UIN must be exactly 9 digits.");
