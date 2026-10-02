@@ -23,6 +23,7 @@ import PartnersPage from "./pages/PartnersPage";
 import GradebookPage from "./pages/Gradebook";
 import ProjectReposPage from "./pages/ProjectReposPage";
 import ProjectGradeEntryPage from "./pages/ProjectGradeEntryPage";
+import InterviewClinicsPage from "./pages/InterviewClinicsPage";
 const router = createBrowserRouter([
   {
     path: formulateUrl("/"),
@@ -153,6 +154,15 @@ const router = createBrowserRouter([
     element: (
       <ProtectedRoute>
         <ProjectGradeEntryPage />
+      </ProtectedRoute>
+    ),
+    errorElement: <RouterErrorBoundaryWrapper />,
+  },
+  {
+    path: formulateUrl("dashboard/:courseId/clinics"),
+    element: (
+      <ProtectedRoute>
+        <InterviewClinicsPage />
       </ProtectedRoute>
     ),
     errorElement: <RouterErrorBoundaryWrapper />,

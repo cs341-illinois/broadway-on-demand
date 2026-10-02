@@ -52,3 +52,11 @@ export const PARTNER_MAX_ROUNDS = 4;
 // createdBy/archivedBy sentinel for the one-time historical backfill script
 // (src/scripts/importPartnerGroups.ts), as opposed to a real staff/admin netId.
 export const PARTNER_IMPORT_SYSTEM_ACTOR = "system-import";
+
+// Interview clinic room blocks are split into slots of this length.
+export const CLINIC_SLOT_MINUTES = 30;
+// Students may cancel their team's clinic booking only until this many hours
+// before the slot starts; after that only staff can cancel.
+export const CLINIC_STUDENT_CANCEL_CUTOFF_HOURS = 24;
+// Upper bound on a single room booking, to catch date-entry typos.
+export const CLINIC_MAX_BLOCK_HOURS = 12;

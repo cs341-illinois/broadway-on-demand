@@ -196,6 +196,16 @@ function CourseContent({
                       {isStaff ? "Manage Partners" : "My Partner(s)"}
                     </Button>
                   </Col>
+                  <Col xs={12} sm={6}>
+                    <Button
+                      className="w-100"
+                      onClick={() =>
+                        navigate(formulateUrl(`dashboard/${courseId}/clinics`))
+                      }
+                    >
+                      Interview Clinics
+                    </Button>
+                  </Col>
                   {isStaff && (
                     <>
                       <hr className="w-100 my-2" />

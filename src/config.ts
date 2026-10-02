@@ -33,6 +33,16 @@ const configSchema = z.object({
   PORT: z.coerce.number().min(1024).default(3000),
   GRADER_TOKEN: z.string().min(32),
   REDIS_URL: z.string().url().min(1, "REDIS_URL is required."),
+  // Base64-encoded 32-byte key used to encrypt staff Outlook refresh tokens
+  // (interview clinics). Outlook integration is disabled when unset.
+  OUTLOOK_TOKEN_KEY: z.optional(
+    z
+      .string()
+      .refine(
+        (k) => Buffer.from(k, "base64").length === 32,
+        "OUTLOOK_TOKEN_KEY must be a base64-encoded 32-byte key.",
+      ),
+  ),
 });
 
 // Validate and parse

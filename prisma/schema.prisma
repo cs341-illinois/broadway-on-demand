@@ -60,6 +60,7 @@ model Course {
   ProjectRepoAssignment ProjectRepoAssignment[]
   ProjectRepoConfig     ProjectRepoConfig[]
   GradeAuditLog         GradeAuditLog[]
+  InterviewClinic       InterviewClinic[]
 }
 
 model Users {
@@ -471,4 +472,103 @@ model GradeAuditLog {
   Users      Users      @relation(fields: [netId, courseId], references: [netId, courseId], onDelete: NoAction)
 
   @@index([courseId, assignmentId, netId])
+}
+
+// Interview clinics: instructors book rooms (ClinicRoomBlock), which are split
+// into 30-minute ClinicSlots. CAs claim slots they will cover; project repo
+// teams book a claimed slot, which creates an Outlook event on the CA's
+// calendar with the team as attendees.
+model InterviewClinic {
+  id            String    @id @default(cuid())
+  courseId      String
+  projectKey    String
+  title         String
+  description   String?
+  signupOpensAt DateTime?
+  createdBy     String
+  createdAt     DateTime  @default(now())
+  archivedAt    DateTime?
+
+  Course     Course            @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  roomBlocks ClinicRoomBlock[]
+  slots      ClinicSlot[]
+  bookings   ClinicBooking[]
+
+  @@index([courseId, archivedAt])
+}
+
+model ClinicRoomBlock {
+  id        String   @id @default(cuid())
+  clinicId  String
+  room      String // Free text; used as the Outlook event location
+  startAt   DateTime
+  endAt     DateTime
+  createdBy String
+  createdAt DateTime @default(now())
+
+  InterviewClinic InterviewClinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  slots           ClinicSlot[]
+
+  @@index([clinicId])
+}
+
+model ClinicSlot {
+  id          String    @id @default(cuid())
+  clinicId    String
+  roomBlockId String
+  startAt     DateTime
+  endAt       DateTime
+  caNetId     String? // CA covering this slot; null = unclaimed
+  claimedAt   DateTime?
+
+  InterviewClinic InterviewClinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  ClinicRoomBlock ClinicRoomBlock @relation(fields: [roomBlockId], references: [id], onDelete: Cascade)
+  bookings        ClinicBooking[]
+
+  @@unique([roomBlockId, startAt])
+  @@index([clinicId, startAt])
+}
+
+enum ClinicCalendarStatus {
+  PENDING
+  CREATED
+  FAILED
+  CANCELLED
+}
+
+model ClinicBooking {
+  id             String    @id @default(cuid())
+  clinicId       String
+  slotId         String
+  projectKey     String
+  repoName       String
+  attendeeNetIds String[] // Team snapshot at booking time
+  bookedBy       String
+  bookedAt       DateTime  @default(now())
+  cancelledAt    DateTime? // null = active
+  cancelledBy    String?
+
+  outlookEventId String?
+  organizerNetId String?
+  calendarStatus ClinicCalendarStatus @default(PENDING)
+  calendarError  String?
+
+  InterviewClinic InterviewClinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  ClinicSlot      ClinicSlot      @relation(fields: [slotId], references: [id], onDelete: Cascade)
+
+  // Partial unique indexes (one active booking per slot, one active booking
+  // per team per clinic) live in the migration SQL since Prisma can't model them.
+  @@index([clinicId, repoName])
+  @@index([slotId])
+}
+
+// Delegated Microsoft Graph grant (Calendars.ReadWrite) for a staff member,
+// so clinic events are organized from their own Outlook calendar.
+model OutlookCalendarGrant {
+  netId                 String   @id
+  encryptedRefreshToken String
+  scopes                String
+  connectedAt           DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  lastError             String?
 }
